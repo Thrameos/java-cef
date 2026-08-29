@@ -119,6 +119,17 @@ set(CMAKE_CONFIGURATION_TYPES Debug Release)
 # Project name.
 project(jcef)
 
+# Enable gcov/gcovr coverage instrumentation for the jcef target (native/*.cpp only,
+# not the vendored libcef_dll_wrapper). Linux/GCC-Clang only for now -- MSVC needs a
+# different toolchain (e.g. OpenCppCoverage) not wired up here.
+option(ENABLE_COVERAGE "Enable compilation for coverage measurement" OFF)
+if(ENABLE_COVERAGE AND NOT CMAKE_SYSTEM_NAME STREQUAL "Windows")
+  if(NOT CMAKE_BUILD_TYPE STREQUAL "Debug")
+    message(WARNING "ENABLE_COVERAGE set -- forcing Debug build for coverage correctness")
+    set(CMAKE_BUILD_TYPE "Debug" CACHE STRING "" FORCE)
+  endif()
+endif()
+
 # Use folders in the resulting project files.
 set_property(GLOBAL PROPERTY OS_FOLDERS ON)
 

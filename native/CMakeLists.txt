@@ -428,3 +428,18 @@ if(OS_WINDOWS)
   COPY_FILES("${JCEF_TARGET}" "${CEF_RESOURCE_FILES}" "${CEF_RESOURCE_DIR}" "${CEF_TARGET_OUT_DIR}")
 endif()
 
+
+#
+# Coverage configuration.
+#
+
+# Applied once here (rather than in each platform-specific block above) since
+# ${JCEF_TARGET} is defined by now regardless of which OS branch ran. Only
+# instruments this repo's own native/*.cpp -- not the vendored libcef_dll_wrapper.
+# GCC/Clang (gcov) only; not supported on Windows (would need a different tool, e.g.
+# OpenCppCoverage).
+if(ENABLE_COVERAGE AND NOT OS_WINDOWS)
+  target_compile_options(${JCEF_TARGET} PRIVATE --coverage -O0)
+  target_link_options(${JCEF_TARGET} PRIVATE --coverage)
+endif()
+
