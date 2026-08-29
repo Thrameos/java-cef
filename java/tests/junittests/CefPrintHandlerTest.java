@@ -26,9 +26,15 @@ import java.nio.file.Path;
 // pipeline for an OSR browser -- onPdfPrintFinished fires with ok=true and a real
 // PDF is written regardless. print_handler.cpp's other CefPrintHandler methods
 // (OnPrintStart/OnPrintSettings/OnPrintDialog/OnPrintJob) are for the
-// window.print()/print-dialog path, not printToPDF, and would need driving a real
-// print dialog to exercise -- same class of risk as CefRunFileDialogCallback (see
-// plan/windows-todo.md), not attempted here.
+// window.print()/print-dialog path, not printToPDF. A browser.print() test was
+// attempted and reverted: even with onPrintDialog returning false ("cancel the
+// printing immediately" per its own Javadoc), the call genuinely hung --
+// confirmed via an isolated run under a hard 45s `timeout` wrapper (not just
+// TestFrame's 30s watchdog, which never even got a chance to fire) that it's a
+// real, unrecoverable hang, not a slow-but-bounded one. Likely CEF's print
+// pipeline blocks at the native level without a real printer backend in this
+// headless environment -- same class of risk as CefRunFileDialogCallback (see
+// plan/windows-todo.md). Not attempted further this session.
 @ExtendWith(TestSetupExtension.class)
 class CefPrintHandlerTest {
     private static final String TEST_URL = "http://test.com/print_handler.html";
