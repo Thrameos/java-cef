@@ -1,0 +1,91 @@
+// Copyright (c) 2026 The Chromium Embedded Framework Authors. All rights
+// reserved. Use of this source code is governed by a BSD-style license that
+// can be found in the LICENSE file.
+
+package tests.junittests;
+
+import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+
+import org.cef.network.CefPostDataElement;
+import org.cef.network.CefRequest;
+import org.junit.jupiter.api.Disabled;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
+
+// More unhappy-path coverage: numeric/size-mismatch edge cases rather than
+// null references (see NullParameterEdgeCaseTest for those). Per the
+// 85%-coverage goal's explicit "happy AND unhappy paths" requirement.
+@ExtendWith(TestSetupExtension.class)
+class MalformedInputEdgeCaseTest {
+    @Test
+    void postDataElementSetToBytesWithSizeLargerThanArrayDoesNotThrow() {
+        CefPostDataElement element = CefPostDataElement.create();
+        byte[] data = {1, 2, 3};
+        // Claim a size larger than the actual array -- exercises
+        // jni_util.cpp's byte-array-length handling with a mismatched
+        // caller-provided size rather than the array's own real length.
+        assertDoesNotThrow(() -> element.setToBytes(100, data));
+        element.dispose();
+    }
+
+    // @Disabled -- IMPORTANT: this is a real, silent (no FATAL/DCHECK output
+    // at all, unlike every other crash found this session) segfault, root-
+    // caused to a signed/unsigned integer bug: native/CefPostDataElement_N.
+    // cpp passes the jint |size| straight into CefPostDataElement::
+    // SetToBytes(), whose C++ signature takes a size_t -- a negative jint
+    // implicitly becomes a huge unsigned value, causing a massive buffer
+    // over-read. Filed as Thrameos/java-cef#19. Do not remove @Disabled
+    // without a fix; run only under a hard external timeout wrapper if
+    // investigating further, since this crash gives no diagnostic to work
+    // from otherwise.
+    @Disabled("Real silent segfault (signed/unsigned integer bug in "
+            + "CefPostDataElement.setToBytes()) -- see Thrameos/java-cef#19")
+    @Test
+    void postDataElementSetToBytesWithNegativeSizeDoesNotThrow() {
+        CefPostDataElement element = CefPostDataElement.create();
+        byte[] data = {1, 2, 3};
+        assertDoesNotThrow(() -> element.setToBytes(-1, data));
+        element.dispose();
+    }
+
+    @Test
+    void postDataElementGetBytesWithZeroSizeBufferDoesNotThrow() {
+        CefPostDataElement element = CefPostDataElement.create();
+        byte[] data = {1, 2, 3};
+        element.setToBytes(data.length, data);
+        byte[] tooSmall = new byte[0];
+        assertDoesNotThrow(() -> element.getBytes(0, tooSmall));
+        element.dispose();
+    }
+
+    @Test
+    void requestSetFlagsWithNegativeAndGarbageValuesDoesNotThrow() {
+        CefRequest request = CefRequest.create();
+        assertDoesNotThrow(() -> request.setFlags(-1));
+        assertDoesNotThrow(() -> request.setFlags(Integer.MIN_VALUE));
+        assertDoesNotThrow(() -> request.setFlags(Integer.MAX_VALUE));
+        assertNotNull(request.toString());
+        request.dispose();
+    }
+
+    @Test
+    void requestSetURLWithEmptyAndMalformedStringsDoesNotThrow() {
+        CefRequest request = CefRequest.create();
+        assertDoesNotThrow(() -> request.setURL(""));
+        assertDoesNotThrow(() -> request.setURL("not a valid url at all"));
+        assertDoesNotThrow(() -> request.setURL("http://"));
+        assertDoesNotThrow(() -> request.setURL("://missing-scheme"));
+        assertNotNull(request.toString());
+        request.dispose();
+    }
+
+    @Test
+    void requestSetHeaderByNameWithEmptyStringsDoesNotThrow() {
+        CefRequest request = CefRequest.create();
+        assertDoesNotThrow(() -> request.setHeaderByName("", "", true));
+        assertDoesNotThrow(() -> request.setHeaderByName("X-Empty-Value", "", true));
+        assertNotNull(request.toString());
+        request.dispose();
+    }
+}

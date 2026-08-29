@@ -7,10 +7,17 @@ package tests.junittests;
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 
+import org.cef.browser.CefMessageRouter;
+import org.cef.browser.CefMessageRouter.CefMessageRouterConfig;
+import org.cef.network.CefCookie;
+import org.cef.network.CefCookieManager;
+import org.cef.network.CefPostDataElement;
 import org.cef.network.CefRequest;
 import org.cef.network.CefResponse;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+
+import java.util.Date;
 
 // Unhappy-path coverage for jni_util.cpp's null-guarded JNI marshaling
 // helpers (GetJNIString: "if (!jstr) return CefString();",
@@ -67,5 +74,42 @@ class NullParameterEdgeCaseTest {
         assertDoesNotThrow(() -> response.setHeaderMap(null));
         assertNotNull(response.toString());
         response.dispose();
+    }
+
+    @Test
+    void requestSetAcceptsAllNullArguments() {
+        CefRequest request = CefRequest.create();
+        assertDoesNotThrow(() -> request.set(null, null, null, null));
+        assertNotNull(request.toString());
+        request.dispose();
+    }
+
+    @Test
+    void postDataElementSetToFileAcceptsNull() {
+        CefPostDataElement element = CefPostDataElement.create();
+        assertDoesNotThrow(() -> element.setToFile(null));
+        element.dispose();
+    }
+
+    @Test
+    void cookieManagerSetCookieWithNullFieldsDoesNotThrow() {
+        CefCookieManager manager = CefCookieManager.getGlobalManager();
+        CefCookie cookie = new CefCookie(
+                null, null, null, null, false, false, new Date(), new Date(), false, null);
+        // Not asserting the return value here (a malformed cookie may
+        // legitimately be rejected) -- only that the native call itself
+        // (which marshals every one of these null String fields through
+        // jni_util.cpp's GetJNIString) doesn't crash.
+        assertDoesNotThrow(() -> manager.setCookie("http://null-cookie-test.invalid/", cookie));
+    }
+
+    @Test
+    void messageRouterConfigWithNullFunctionNamesDoesNotThrowOnCreate() {
+        CefMessageRouterConfig config = new CefMessageRouterConfig();
+        config.jsQueryFunction = null;
+        config.jsCancelFunction = null;
+        CefMessageRouter[] router = {null};
+        assertDoesNotThrow(() -> router[0] = CefMessageRouter.create(config));
+        if (router[0] != null) router[0].dispose();
     }
 }
