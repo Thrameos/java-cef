@@ -69,7 +69,16 @@ public class TestSetupExtension
 
         // Initialize the singleton CefApp instance.
         CefSettings settings = new CefSettings();
-        CefApp.getInstance(settings);
+        // These CI/headless-environment flags are required for the test bench to
+        // run on a display-less CI agent (no real GPU, no Vulkan driver): without
+        // them a GPU-process crash during browser teardown triggers a slow (multi-
+        // minute) Vulkan/on-device-model probing fallback that blows past any
+        // reasonable test timeout, rather than a fast, clean failure.
+        String[] args = {"--disable-gpu", "--disable-gpu-compositing", "--disable-dev-shm-usage",
+                "--no-sandbox", "--use-gl=disabled", "--disable-software-rasterizer",
+                "--disable-features=OnDeviceModel,OptimizationGuideOnDeviceModel,Vulkan,"
+                        + "VulkanFromANGLE,DefaultANGLEVulkan"};
+        CefApp.getInstance(args, settings);
     }
 
     // Executed after all tests have completed.
@@ -78,6 +87,12 @@ public class TestSetupExtension
         if (TestSetupContext.debugPrint()) {
             System.out.println("TestSetupExtension.close");
         }
+
+        // See java-cef#4 / plan/findings.md: CefApp.dispose() below reliably
+        // crashes native shutdown in Debug/coverage builds. Flush coverage data
+        // (a no-op on non-coverage builds) before that known-crashing call so a
+        // coverage CI run still captures real numbers for everything that ran.
+        CoverageTestHelper.flush();
 
         CefApp.getInstance().dispose();
 
