@@ -7,8 +7,10 @@ package tests.junittests;
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 
+import org.cef.network.CefCookieManager;
 import org.cef.network.CefPostDataElement;
 import org.cef.network.CefRequest;
+import org.cef.network.CefResponse;
 import org.junit.jupiter.api.Disabled;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -87,5 +89,25 @@ class MalformedInputEdgeCaseTest {
         assertDoesNotThrow(() -> request.setHeaderByName("X-Empty-Value", "", true));
         assertNotNull(request.toString());
         request.dispose();
+    }
+
+    @Test
+    void responseSetStatusWithOutOfRangeValuesDoesNotThrow() {
+        CefResponse response = CefResponse.create();
+        assertDoesNotThrow(() -> response.setStatus(-1));
+        assertDoesNotThrow(() -> response.setStatus(0));
+        assertDoesNotThrow(() -> response.setStatus(99999));
+        assertDoesNotThrow(() -> response.setStatus(Integer.MIN_VALUE));
+        assertDoesNotThrow(() -> response.setStatus(Integer.MAX_VALUE));
+        assertNotNull(response.toString());
+        response.dispose();
+    }
+
+    @Test
+    void cookieManagerDeleteCookiesWithNullArgumentsDoesNotThrow() {
+        CefCookieManager manager = CefCookieManager.getGlobalManager();
+        assertDoesNotThrow(() -> manager.deleteCookies(null, null));
+        assertDoesNotThrow(() -> manager.deleteCookies("http://test.invalid/", null));
+        assertDoesNotThrow(() -> manager.deleteCookies(null, "some-cookie"));
     }
 }
