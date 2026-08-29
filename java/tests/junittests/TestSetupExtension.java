@@ -65,6 +65,19 @@ public class TestSetupExtension
                     countdown_.countDown();
                 }
             }
+
+            @Override
+            public void onBeforeCommandLineProcessing(
+                    String process_type, org.cef.callback.CefCommandLine command_line) {
+                // Fires once, synchronously, before any @Test runs -- the only way
+                // to obtain a real CefCommandLine (no public factory exists). Only
+                // capture the browser-process instance (process_type is null/empty
+                // there; helper/renderer processes would also invoke this).
+                if ((process_type == null || process_type.isEmpty())
+                        && TestSetupContext.getCapturedCommandLine() == null) {
+                    TestSetupContext.setCapturedCommandLine(command_line);
+                }
+            }
         });
 
         // Initialize the singleton CefApp instance.

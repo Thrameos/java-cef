@@ -4,6 +4,7 @@
 
 package tests.junittests;
 
+import org.cef.callback.CefCommandLine;
 import org.junit.jupiter.api.extension.ExtensionContext;
 
 import java.util.Optional;
@@ -12,9 +13,24 @@ import java.util.Optional;
 class TestSetupContext {
     private static boolean debugPrint_ = false;
 
+    // The CefCommandLine captured by TestSetupExtension's
+    // onBeforeCommandLineProcessing() override during CefApp startup. There is no
+    // public factory for CefCommandLine -- this callback (which fires once,
+    // synchronously, before any @Test runs) is the only way to obtain a real
+    // instance. See plan/roadmap.md Track A item 3.
+    private static CefCommandLine capturedCommandLine_ = null;
+
     // Debug print statements may be enabled via `--config debugPrint=true`.
     static boolean debugPrint() {
         return debugPrint_;
+    }
+
+    static CefCommandLine getCapturedCommandLine() {
+        return capturedCommandLine_;
+    }
+
+    static void setCapturedCommandLine(CefCommandLine commandLine) {
+        capturedCommandLine_ = commandLine;
     }
 
     // Initialize from global configuration parameters.
