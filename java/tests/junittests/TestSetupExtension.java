@@ -107,6 +107,29 @@ public class TestSetupExtension
                                     command_line.getArguments()));
                 }
             }
+
+            @Override
+            public void onRegisterCustomSchemes(org.cef.callback.CefSchemeRegistrar registrar) {
+                // Fires once, synchronously, before any @Test runs -- the only way
+                // to obtain a real CefSchemeRegistrar (no public factory exists).
+                // Register a scheme once (expect true), then again with the same
+                // name (expect false, per this method's own Javadoc: "It should
+                // only be called once per unique schemeName value ... if
+                // schemeName is already registered ... this method will return
+                // false") -- exercises both the happy and unhappy path in one
+                // capture. See plan/roadmap.md Track A item 6.
+                boolean firstResult = registrar.addCustomScheme("jceftestscheme",
+                        true /* isStandard */, false /* isLocal */,
+                        false /* isDisplayIsolated */, false /* isSecure */,
+                        true /* isCorsEnabled */, false /* isCspBypassing */,
+                        true /* isFetchEnabled */);
+                boolean secondResult = registrar.addCustomScheme("jceftestscheme",
+                        true /* isStandard */, false /* isLocal */,
+                        false /* isDisplayIsolated */, false /* isSecure */,
+                        true /* isCorsEnabled */, false /* isCspBypassing */,
+                        true /* isFetchEnabled */);
+                TestSetupContext.setCapturedSchemeRegistrationResults(firstResult, secondResult);
+            }
         });
 
         // Initialize the singleton CefApp instance.

@@ -54,6 +54,31 @@ class TestSetupContext {
         capturedCommandLineSnapshot_ = snapshot;
     }
 
+    // Results of the two CefSchemeRegistrar.addCustomScheme() calls
+    // TestSetupExtension's onRegisterCustomSchemes() override makes for the same
+    // scheme name, back to back: the first is expected true (new registration),
+    // the second false (duplicate). See plan/roadmap.md Track A item 6.
+    static final class SchemeRegistrationResults {
+        final boolean firstResult;
+        final boolean secondResult;
+
+        SchemeRegistrationResults(boolean firstResult, boolean secondResult) {
+            this.firstResult = firstResult;
+            this.secondResult = secondResult;
+        }
+    }
+
+    private static SchemeRegistrationResults capturedSchemeRegistrationResults_ = null;
+
+    static SchemeRegistrationResults getCapturedSchemeRegistrationResults() {
+        return capturedSchemeRegistrationResults_;
+    }
+
+    static void setCapturedSchemeRegistrationResults(boolean firstResult, boolean secondResult) {
+        capturedSchemeRegistrationResults_ =
+                new SchemeRegistrationResults(firstResult, secondResult);
+    }
+
     // Initialize from global configuration parameters.
     static void initialize(ExtensionContext context) {
         Optional<String> debugPrint = context.getConfigurationParameter("debugPrint");
