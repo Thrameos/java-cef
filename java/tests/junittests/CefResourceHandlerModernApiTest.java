@@ -159,4 +159,125 @@ class CefResourceHandlerModernApiTest {
         assertTrue(finalTitle[0].endsWith(RESOURCE_CONTENT.substring(10)), "Range-fetch "
                 + "result missing/wrong from title: " + finalTitle[0]);
     }
+
+    private static final String ASYNC_PAGE_URL =
+            "http://test.com/modern_resource_api_async_page.html";
+    private static final String ASYNC_RESOURCE_URL =
+            "http://test.com/modern_resource_api_async.bin";
+    private static final String ASYNC_CONTENT = "async-data-1234";
+    private static final String ASYNC_PAGE_CONTENT = "<html><body><script>"
+            + "fetch('" + ASYNC_RESOURCE_URL + "').then(r => r.text())"
+            + " .then(text => { document.title = 'async-done:' + text; });"
+            + "</script></body></html>";
+
+    // Unlike ModernResourceHandler above (which always has data ready
+    // immediately and never touches the callback objects themselves),
+    // this handler defers via bytesRead=0/return true and later calls
+    // callback.Continue() from a background thread -- the only way to
+    // actually exercise CefResourceReadCallback's own Continue()/getBuffer()
+    // JNI methods (native/CefResourceReadCallback_N.cpp), which the
+    // synchronous path above never reaches.
+    private static class AsyncResourceHandler implements CefResourceHandler {
+        private boolean delivered_ = false;
+
+        @Override
+        public boolean processRequest(CefRequest request, CefCallback callback) {
+            return false;
+        }
+
+        @Override
+        public boolean open(CefRequest request, BoolRef handleRequest, CefCallback callback) {
+            handleRequest.set(true);
+            return true;
+        }
+
+        @Override
+        public void getResponseHeaders(
+                CefResponse response, IntRef responseLength, StringRef redirectUrl) {
+            responseLength.set(ASYNC_CONTENT.length());
+            response.setMimeType("text/plain");
+            response.setStatus(200);
+        }
+
+        @Override
+        public boolean readResponse(
+                byte[] dataOut, int bytesToRead, IntRef bytesRead, CefCallback callback) {
+            return false;
+        }
+
+        @Override
+        public boolean read(byte[] dataOut, int bytesToRead, IntRef bytesRead,
+                CefResourceReadCallback callback) {
+            if (delivered_) {
+                bytesRead.set(0);
+                return false;
+            }
+            delivered_ = true;
+            bytesRead.set(0);
+            new Thread(() -> {
+                try {
+                    Thread.sleep(50);
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                }
+                byte[] buffer = callback.getBuffer();
+                byte[] data = ASYNC_CONTENT.getBytes();
+                System.arraycopy(data, 0, buffer, 0, data.length);
+                callback.Continue(data.length);
+            }).start();
+            return true;
+        }
+
+        @Override
+        public boolean skip(
+                long bytesToSkip, LongRef bytesSkipped, CefResourceSkipCallback callback) {
+            bytesSkipped.set(0);
+            return false;
+        }
+
+        @Override
+        public void cancel() {}
+    }
+
+    @Test
+    void readCanCompleteAsynchronouslyViaTheCallbackObject() {
+        boolean[] gotTitle = {false};
+        String[] finalTitle = {null};
+
+        TestFrame frame = new TestFrame() {
+            @Override
+            protected void setupTest() {
+                addResource(ASYNC_PAGE_URL, ASYNC_PAGE_CONTENT, "text/html");
+
+                client_.addDisplayHandler(new CefDisplayHandlerAdapter() {
+                    @Override
+                    public void onTitleChange(CefBrowser browser, String title) {
+                        if (gotTitle[0] || !title.startsWith("async-done:")) return;
+                        gotTitle[0] = true;
+                        finalTitle[0] = title;
+                        terminateTest();
+                    }
+                });
+
+                createBrowser(ASYNC_PAGE_URL, true /* useOSR */);
+                super.setupTest();
+            }
+
+            @Override
+            public CefResourceHandler getResourceHandler(
+                    CefBrowser browser, CefFrame frame, CefRequest request) {
+                if (ASYNC_RESOURCE_URL.equals(request.getURL())) {
+                    return new AsyncResourceHandler();
+                }
+                return super.getResourceHandler(browser, frame, request);
+            }
+        };
+
+        frame.awaitCompletion();
+
+        assertTrue(gotTitle[0], "The page's fetch() for the asynchronously-served resource "
+                + "never completed");
+        assertTrue(finalTitle[0].equals("async-done:" + ASYNC_CONTENT), "Unexpected result: "
+                + finalTitle[0]);
+    }
 }
