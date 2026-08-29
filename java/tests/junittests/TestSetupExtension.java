@@ -69,7 +69,16 @@ public class TestSetupExtension
 
         // Initialize the singleton CefApp instance.
         CefSettings settings = new CefSettings();
-        CefApp.getInstance(settings);
+        // These CI/headless-environment flags are required for the test bench to
+        // run on a display-less CI agent (no real GPU, no Vulkan driver): without
+        // them a GPU-process crash during browser teardown triggers a slow (multi-
+        // minute) Vulkan/on-device-model probing fallback that blows past any
+        // reasonable test timeout, rather than a fast, clean failure.
+        String[] args = {"--disable-gpu", "--disable-gpu-compositing", "--disable-dev-shm-usage",
+                "--no-sandbox", "--use-gl=disabled", "--disable-software-rasterizer",
+                "--disable-features=OnDeviceModel,OptimizationGuideOnDeviceModel,Vulkan,"
+                        + "VulkanFromANGLE,DefaultANGLEVulkan"};
+        CefApp.getInstance(args, settings);
     }
 
     // Executed after all tests have completed.

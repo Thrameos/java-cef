@@ -80,12 +80,15 @@ class DragDataTest {
         dragData.addFile(path1, "File 1");
         dragData.addFile(path2, "File 2");
 
+        // CefDragData::GetFileNames() returns the display names passed to addFile(),
+        // not the paths -- see cef_drag_data.h ("Retrieve the list of file names
+        // that are being dragged...", as distinct from GetFilePaths()).
         Vector<String> fileNames = new Vector<>();
         assertTrue(dragData.getFileNames(fileNames));
 
         assertEquals(2, fileNames.size());
-        assertEquals(path1, fileNames.get(0));
-        assertEquals(path2, fileNames.get(1));
+        assertEquals("File 1", fileNames.get(0));
+        assertEquals("File 2", fileNames.get(1));
 
         assertFalse(dragData.isLink());
         assertTrue(dragData.isFile());
