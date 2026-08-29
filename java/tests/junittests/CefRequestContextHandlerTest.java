@@ -141,6 +141,15 @@ class CefRequestContextHandlerTest {
                     }
                 });
 
+                // TestFrame's constructor unconditionally registers `this` as the
+                // CefClient's CefRequestHandler, and getResourceRequestHandler
+                // always returns non-null -- which would permanently shadow the
+                // CefRequestContextHandler under test (CEF only consults it when
+                // the browser-level handler returns null). Opt out of that so
+                // this test's CefRequestContextHandler actually gets a chance,
+                // instead of the request falling through to a real network call.
+                delegateToRequestContextHandler_ = true;
+
                 // Deliberately not calling super.setupTest()/createBrowser(String,
                 // boolean) -- build the browser directly with a custom
                 // CefRequestContext so this test's CefRequestContextHandler (not
