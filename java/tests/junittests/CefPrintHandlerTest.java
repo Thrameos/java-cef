@@ -9,6 +9,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import org.cef.browser.CefBrowser;
 import org.cef.handler.CefPrintHandlerAdapter;
 import org.cef.misc.CefPdfPrintSettings;
+import org.junit.jupiter.api.Disabled;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 
@@ -26,15 +27,9 @@ import java.nio.file.Path;
 // pipeline for an OSR browser -- onPdfPrintFinished fires with ok=true and a real
 // PDF is written regardless. print_handler.cpp's other CefPrintHandler methods
 // (OnPrintStart/OnPrintSettings/OnPrintDialog/OnPrintJob) are for the
-// window.print()/print-dialog path, not printToPDF. A browser.print() test was
-// attempted and reverted: even with onPrintDialog returning false ("cancel the
-// printing immediately" per its own Javadoc), the call genuinely hung --
-// confirmed via an isolated run under a hard 45s `timeout` wrapper (not just
-// TestFrame's 30s watchdog, which never even got a chance to fire) that it's a
-// real, unrecoverable hang, not a slow-but-bounded one. Likely CEF's print
-// pipeline blocks at the native level without a real printer backend in this
-// headless environment -- same class of risk as CefRunFileDialogCallback (see
-// plan/windows-todo.md). Not attempted further this session.
+// window.print()/print-dialog path, not printToPDF -- see
+// browserPrintInvokesPrintStartSettingsAndDialog() below, @Disabled, for
+// that path.
 @ExtendWith(TestSetupExtension.class)
 class CefPrintHandlerTest {
     private static final String TEST_URL = "http://test.com/print_handler.html";
@@ -81,5 +76,70 @@ class CefPrintHandlerTest {
         } finally {
             Files.deleteIfExists(outFile);
         }
+    }
+
+    // @Disabled -- IMPORTANT, do not remove without extreme caution: this
+    // test causes a genuine UNRECOVERABLE hang, confirmed via an isolated run
+    // wrapped in a hard external `timeout -k 5 45` (SIGTERM then SIGKILL) --
+    // even SIGKILL fallback was needed. TestFrame's own 30s watchdog never
+    // got a chance to run. Even with onPrintDialog returning false ("cancel
+    // the printing immediately" per its own Javadoc), browser.print() itself
+    // never returns. Likely CEF's print pipeline blocks at the native level
+    // without a real printer backend in this headless environment -- same
+    // class of risk as CefRunFileDialogCallback (see plan/windows-todo.md).
+    // Filed as Thrameos/java-cef#12 (also covers the analogous DevTools hang,
+    // see CefDevToolsClientTest.java).
+    @Disabled("UNRECOVERABLE HANG, not just a slow/bounded failure -- see "
+            + "Thrameos/java-cef#12. Do not run without a hard external "
+            + "timeout wrapper (e.g. `timeout -k 5 45`), and do not remove "
+            + "@Disabled as part of a normal suite run.")
+    @Test
+    void browserPrintInvokesPrintStartSettingsAndDialog() {
+        boolean[] gotPrintStart = {false};
+        boolean[] gotPrintSettings = {false};
+        boolean[] gotPrintDialog = {false};
+
+        TestFrame frame = new TestFrame() {
+            @Override
+            protected void setupTest() {
+                client_.addPrintHandler(new CefPrintHandlerAdapter() {
+                    @Override
+                    public void onPrintStart(CefBrowser browser) {
+                        gotPrintStart[0] = true;
+                    }
+
+                    @Override
+                    public void onPrintSettings(CefBrowser browser,
+                            org.cef.misc.CefPrintSettings settings, boolean getDefaults) {
+                        gotPrintSettings[0] = true;
+                    }
+
+                    @Override
+                    public boolean onPrintDialog(CefBrowser browser, boolean hasSelection,
+                            org.cef.callback.CefPrintDialogCallback callback) {
+                        gotPrintDialog[0] = true;
+                        terminateTest();
+                        // Cancel immediately -- no real dialog is shown.
+                        return false;
+                    }
+                });
+
+                addResource(TEST_URL, CONTENT, "text/html");
+                createBrowser(TEST_URL, true /* useOSR */);
+                super.setupTest();
+            }
+
+            @Override
+            public void onLoadingStateChange(CefBrowser browser, boolean isLoading,
+                    boolean canGoBack, boolean canGoForward) {
+                if (!isLoading) browser.print();
+            }
+        };
+
+        frame.awaitCompletion();
+
+        assertTrue(gotPrintStart[0], "onPrintStart was never invoked");
+        assertTrue(gotPrintSettings[0], "onPrintSettings was never invoked");
+        assertTrue(gotPrintDialog[0], "onPrintDialog was never invoked");
     }
 }
