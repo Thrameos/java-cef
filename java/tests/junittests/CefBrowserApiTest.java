@@ -11,23 +11,20 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.cef.browser.CefBrowser;
 import org.cef.browser.CefFrame;
-import org.cef.network.CefRequest;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 
-import java.awt.image.BufferedImage;
 import java.util.Vector;
-import java.util.concurrent.TimeUnit;
 
 // Broad, low-risk coverage sweep of CefBrowser_N.cpp (952 lines, only 13%
 // covered per Track B's real gcovr run -- by far the largest remaining gap).
-// Everything here is a plain synchronous or CompletableFuture-based API call
-// against a live browser -- no synthetic OS-level input events, no user-gesture
-// requirements, so none of the hang/gesture risk documented for the
-// context-menu/download/dialog/print/devtools attempts elsewhere in
-// plan/roadmap.md. Grouped into one class per plan/roadmap.md's "shotgun"
-// approach -- multiple small assertions per test rather than one class per
-// method, to move quickly across a large low-risk surface.
+// See CefBrowserApiDebugSafeTest for two more methods that were originally
+// here too (executeJavaScriptAndLoadRequestDoNotThrow,
+// createScreenshotReturnsARealImage) -- moved out because THIS method
+// (viewSource()/find()/stopFinding(), bisected and confirmed via
+// --select-method isolation) is the one that triggers a Debug/coverage-build
+// -only mojo crash (see plan/roadmap.md's Tier A item 2), so this class stays
+// excluded from that measurement run while the other two rejoin it.
 @ExtendWith(TestSetupExtension.class)
 class CefBrowserApiTest {
     private static final String TEST_URL = "http://test.com/browser_api.html";
@@ -107,72 +104,5 @@ class CefBrowserApiTest {
         assertFalse(isPopup[0]);
         assertTrue(hasDocument[0]);
         assertEquals(TEST_URL, url[0]);
-    }
-
-    @Test
-    void executeJavaScriptAndLoadRequestDoNotThrow() {
-        TestFrame frame = new TestFrame() {
-            @Override
-            protected void setupTest() {
-                addResource(TEST_URL, CONTENT, "text/html");
-                createBrowser(TEST_URL, true /* useOSR */);
-                super.setupTest();
-            }
-
-            @Override
-            public void onLoadingStateChange(CefBrowser browser, boolean isLoading,
-                    boolean canGoBack, boolean canGoForward) {
-                if (isLoading) return;
-                terminateTest();
-            }
-        };
-
-        frame.awaitCompletion();
-
-        CefBrowser browser = frame.browser_;
-        browser.executeJavaScript("1+1;", browser.getURL(), 1);
-
-        CefRequest request = CefRequest.create();
-        request.setURL(TEST_URL);
-        browser.loadRequest(request);
-    }
-
-    @Test
-    void createScreenshotReturnsARealImage() {
-        BufferedImage[] image = {null};
-        boolean[] gotImage = {false};
-
-        TestFrame frame = new TestFrame() {
-            @Override
-            protected void setupTest() {
-                addResource(TEST_URL, CONTENT, "text/html");
-                createBrowser(TEST_URL, true /* useOSR */);
-                super.setupTest();
-            }
-
-            @Override
-            public void onLoadingStateChange(CefBrowser browser, boolean isLoading,
-                    boolean canGoBack, boolean canGoForward) {
-                if (isLoading) return;
-                browser.createScreenshot(false /* nativeResolution */)
-                        .whenComplete((img, ex) -> {
-                            if (ex == null) {
-                                image[0] = img;
-                                gotImage[0] = true;
-                            }
-                            terminateTest();
-                        });
-            }
-        };
-
-        // A longer timeout than the 30s default: an isolated run showed the
-        // default get(15, SECONDS) inline wasn't enough headroom in this
-        // headless OSR/GL environment.
-        frame.awaitCompletion(45, TimeUnit.SECONDS);
-
-        assertTrue(gotImage[0], "createScreenshot's future never completed successfully");
-        assertNotNull(image[0]);
-        assertTrue(image[0].getWidth() > 0);
-        assertTrue(image[0].getHeight() > 0);
     }
 }
