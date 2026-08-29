@@ -55,6 +55,33 @@ class CefPostDataTest {
     }
 
     @Test
+    void elementSetToZeroLengthBytes() {
+        CefPostDataElement element = CefPostDataElement.create();
+        // Exercises jni_util.cpp's GetJNIByteArray/element-bytes path with a
+        // genuinely empty (not null) byte array, previously untested.
+        element.setToBytes(0, new byte[0]);
+
+        assertEquals(Type.PDE_TYPE_BYTES, element.getType());
+        assertEquals(0, element.getBytesCount());
+
+        byte[] readBack = new byte[0];
+        assertEquals(0, element.getBytes(0, readBack));
+        element.dispose();
+    }
+
+    @Test
+    void elementSetToEmptyFilePathLeavesElementEmpty() {
+        // CEF's own CefPostDataElement::SetToFile() no-ops on an empty file name
+        // (confirmed here) rather than setting type PDE_TYPE_FILE with an empty
+        // path -- a real, useful-to-document edge case in the underlying CEF
+        // behavior, not a JCEF bug.
+        CefPostDataElement element = CefPostDataElement.create();
+        element.setToFile("");
+        assertEquals(Type.PDE_TYPE_EMPTY, element.getType());
+        element.dispose();
+    }
+
+    @Test
     void elementSetToFile() {
         CefPostDataElement element = CefPostDataElement.create();
         element.setToFile("/tmp/does-not-need-to-exist.txt");

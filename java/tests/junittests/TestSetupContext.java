@@ -4,33 +4,54 @@
 
 package tests.junittests;
 
-import org.cef.callback.CefCommandLine;
 import org.junit.jupiter.api.extension.ExtensionContext;
 
+import java.util.Map;
 import java.util.Optional;
+import java.util.Vector;
 
 // Stores global test setup state for access from package classes.
 class TestSetupContext {
     private static boolean debugPrint_ = false;
 
-    // The CefCommandLine captured by TestSetupExtension's
-    // onBeforeCommandLineProcessing() override during CefApp startup. There is no
-    // public factory for CefCommandLine -- this callback (which fires once,
-    // synchronously, before any @Test runs) is the only way to obtain a real
-    // instance. See plan/roadmap.md Track A item 3.
-    private static CefCommandLine capturedCommandLine_ = null;
+    // An eager snapshot of the values read off the browser-process CefCommandLine
+    // during TestSetupExtension's onBeforeCommandLineProcessing() override. There
+    // is no public factory for CefCommandLine -- that callback is the only way to
+    // obtain a real instance -- but the live object is not safe to hold onto past
+    // the callback: confirmed empirically (via System.identityHashCode() matching
+    // but hasSwitches() flipping from true to false) that Chromium resets the same
+    // underlying native command-line object sometime after the callback returns,
+    // once it has consumed the switches internally. So the getters are called and
+    // their results copied into plain data right there in the callback, not
+    // exposed as the live CefCommandLine. See plan/roadmap.md Track A item 3.
+    static final class CommandLineSnapshot {
+        final boolean hasSwitches;
+        final Map<String, String> switches;
+        final boolean hasArguments;
+        final Vector<String> arguments;
+
+        CommandLineSnapshot(boolean hasSwitches, Map<String, String> switches,
+                boolean hasArguments, Vector<String> arguments) {
+            this.hasSwitches = hasSwitches;
+            this.switches = switches;
+            this.hasArguments = hasArguments;
+            this.arguments = arguments;
+        }
+    }
+
+    private static CommandLineSnapshot capturedCommandLineSnapshot_ = null;
 
     // Debug print statements may be enabled via `--config debugPrint=true`.
     static boolean debugPrint() {
         return debugPrint_;
     }
 
-    static CefCommandLine getCapturedCommandLine() {
-        return capturedCommandLine_;
+    static CommandLineSnapshot getCapturedCommandLineSnapshot() {
+        return capturedCommandLineSnapshot_;
     }
 
-    static void setCapturedCommandLine(CefCommandLine commandLine) {
-        capturedCommandLine_ = commandLine;
+    static void setCapturedCommandLineSnapshot(CommandLineSnapshot snapshot) {
+        capturedCommandLineSnapshot_ = snapshot;
     }
 
     // Initialize from global configuration parameters.

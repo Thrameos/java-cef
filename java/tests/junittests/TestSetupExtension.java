@@ -57,7 +57,28 @@ public class TestSetupExtension
             return;
         }
 
-        CefApp.addAppHandler(new CefAppHandlerAdapter(null) {
+        // These CI/headless-environment flags are required for the test bench to
+        // run on a display-less CI agent (no real GPU, no Vulkan driver): without
+        // them a GPU-process crash during browser teardown triggers a slow (multi-
+        // minute) Vulkan/on-device-model probing fallback that blows past any
+        // reasonable test timeout, rather than a fast, clean failure.
+        String[] args = {"--disable-gpu", "--disable-gpu-compositing", "--disable-dev-shm-usage",
+                "--no-sandbox", "--use-gl=disabled", "--disable-software-rasterizer",
+                "--disable-features=OnDeviceModel,OptimizationGuideOnDeviceModel,Vulkan,"
+                        + "VulkanFromANGLE,DefaultANGLEVulkan"};
+
+        // IMPORTANT: pass `args` here, not null. CefApp.getInstance(args, settings)
+        // below only forwards `args` onto the command line via the *default*
+        // CefAppHandlerAdapter.onBeforeCommandLineProcessing() that CefApp installs
+        // on itself as appHandler_ -- but only if appHandler_ is still unset at
+        // that point. addAppHandler() here runs first and permanently replaces
+        // appHandler_, so if this adapter were constructed with `null` (as it
+        // originally was), the args above would be silently discarded and never
+        // reach the real Chromium command line -- discovered via CefCommandLineTest
+        // asserting on switches that turned out to never actually be set. Passing
+        // `args` through and delegating to super.onBeforeCommandLineProcessing()
+        // restores the forwarding this adapter's presence otherwise disables.
+        CefApp.addAppHandler(new CefAppHandlerAdapter(args) {
             @Override
             public void stateHasChanged(org.cef.CefApp.CefAppState state) {
                 if (state == CefAppState.TERMINATED) {
@@ -69,28 +90,27 @@ public class TestSetupExtension
             @Override
             public void onBeforeCommandLineProcessing(
                     String process_type, org.cef.callback.CefCommandLine command_line) {
+                super.onBeforeCommandLineProcessing(process_type, command_line);
+
                 // Fires once, synchronously, before any @Test runs -- the only way
                 // to obtain a real CefCommandLine (no public factory exists). Only
-                // capture the browser-process instance (process_type is null/empty
-                // there; helper/renderer processes would also invoke this).
+                // snapshot the browser-process instance (process_type is null/empty
+                // there; helper/renderer processes would also invoke this). The
+                // live command_line object is not safe to hold onto past this
+                // callback (see TestSetupContext.CommandLineSnapshot's comment), so
+                // its getters are called and copied into plain data right here.
                 if ((process_type == null || process_type.isEmpty())
-                        && TestSetupContext.getCapturedCommandLine() == null) {
-                    TestSetupContext.setCapturedCommandLine(command_line);
+                        && TestSetupContext.getCapturedCommandLineSnapshot() == null) {
+                    TestSetupContext.setCapturedCommandLineSnapshot(
+                            new TestSetupContext.CommandLineSnapshot(command_line.hasSwitches(),
+                                    command_line.getSwitches(), command_line.hasArguments(),
+                                    command_line.getArguments()));
                 }
             }
         });
 
         // Initialize the singleton CefApp instance.
         CefSettings settings = new CefSettings();
-        // These CI/headless-environment flags are required for the test bench to
-        // run on a display-less CI agent (no real GPU, no Vulkan driver): without
-        // them a GPU-process crash during browser teardown triggers a slow (multi-
-        // minute) Vulkan/on-device-model probing fallback that blows past any
-        // reasonable test timeout, rather than a fast, clean failure.
-        String[] args = {"--disable-gpu", "--disable-gpu-compositing", "--disable-dev-shm-usage",
-                "--no-sandbox", "--use-gl=disabled", "--disable-software-rasterizer",
-                "--disable-features=OnDeviceModel,OptimizationGuideOnDeviceModel,Vulkan,"
-                        + "VulkanFromANGLE,DefaultANGLEVulkan"};
         CefApp.getInstance(args, settings);
     }
 

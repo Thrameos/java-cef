@@ -95,6 +95,31 @@ class CefRequestTest {
     }
 
     @Test
+    void setHeaderMapWithEmptyMapClearsExistingHeaders() {
+        CefRequest request = CefRequest.create();
+        request.setHeaderByName("X-Test", "value1", true);
+        assertEquals("value1", request.getHeaderByName("X-Test"));
+
+        // Exercises SetJNIStringMultiMap's empty-map path in jni_util.cpp.
+        request.setHeaderMap(new HashMap<>());
+        assertEquals("", request.getHeaderByName("X-Test"));
+        request.dispose();
+    }
+
+    @Test
+    void setHeaderMapWithEmptyStringValuePreservesEmptyValue() {
+        CefRequest request = CefRequest.create();
+        Map<String, String> headers = new HashMap<>();
+        headers.put("X-Empty", "");
+        request.setHeaderMap(headers);
+
+        Map<String, String> readBack = new HashMap<>();
+        request.getHeaderMap(readBack);
+        assertEquals("", readBack.get("X-Empty"));
+        request.dispose();
+    }
+
+    @Test
     void setAll() {
         CefRequest request = CefRequest.create();
         Map<String, String> headers = new HashMap<>();
