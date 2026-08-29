@@ -81,6 +81,66 @@ class CefCookieManagerTest {
     }
 
     @Test
+    void visitorReturningFalseStopsEarly() throws InterruptedException {
+        CefCookieManager manager = CefCookieManager.getGlobalManager();
+
+        CefCookie cookieA = new CefCookie("jcef_stop_early_a", "a", "", "/", false, false,
+                new Date(), new Date(), false, null);
+        CefCookie cookieB = new CefCookie("jcef_stop_early_b", "b", "", "/", false, false,
+                new Date(), new Date(), false, null);
+        assertTrue(manager.setCookie(TEST_URL, cookieA));
+        assertTrue(manager.setCookie(TEST_URL, cookieB));
+
+        AtomicBoolean visitedMoreThanOne = new AtomicBoolean(false);
+        CountDownLatch latch = new CountDownLatch(1);
+        manager.visitUrlCookies(TEST_URL, true, (visited, count, total, delete) -> {
+            if (count > 0) visitedMoreThanOne.set(true);
+            latch.countDown();
+            // Returning false must stop visiting after just this one cookie.
+            return false;
+        });
+
+        assertTrue(latch.await(10, TimeUnit.SECONDS), "Cookie visitor callback timed out");
+        assertTrue(!visitedMoreThanOne.get(),
+                "Visitor was invoked again after returning false from visit()");
+
+        deleteAndAwait(manager, TEST_URL, "jcef_stop_early_a");
+        deleteAndAwait(manager, TEST_URL, "jcef_stop_early_b");
+    }
+
+    @Test
+    void visitorSettingDeleteRefRemovesCookie() throws InterruptedException {
+        CefCookieManager manager = CefCookieManager.getGlobalManager();
+
+        CefCookie cookie = new CefCookie("jcef_delete_via_visitor", "value", "", "/", false,
+                false, new Date(), new Date(), false, null);
+        assertTrue(manager.setCookie(TEST_URL, cookie));
+
+        CountDownLatch visitLatch = new CountDownLatch(1);
+        manager.visitUrlCookies(TEST_URL, true, (visited, count, total, delete) -> {
+            if ("jcef_delete_via_visitor".equals(visited.name)) {
+                delete.set(true);
+            }
+            visitLatch.countDown();
+            return true;
+        });
+        assertTrue(visitLatch.await(10, TimeUnit.SECONDS), "Cookie visitor callback timed out");
+
+        AtomicBoolean stillFound = new AtomicBoolean(false);
+        CountDownLatch confirmLatch = new CountDownLatch(1);
+        boolean hasVisitor = manager.visitUrlCookies(TEST_URL, true, (visited, count, total, delete) -> {
+            if ("jcef_delete_via_visitor".equals(visited.name)) stillFound.set(true);
+            if (count == total - 1) confirmLatch.countDown();
+            return true;
+        });
+        if (hasVisitor) {
+            confirmLatch.await(5, TimeUnit.SECONDS);
+        }
+        assertTrue(!stillFound.get(),
+                "Cookie was still present after visitor set delete=true");
+    }
+
+    @Test
     void flushStore() throws InterruptedException {
         CefCookieManager manager = CefCookieManager.getGlobalManager();
         CountDownLatch latch = new CountDownLatch(1);
