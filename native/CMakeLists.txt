@@ -171,6 +171,16 @@ set(JCEF_SRCS_WINDOWS
   temp_window_win.h
   util_win.cpp
   )
+# Coverage-only test helper (see java-cef#4 / plan/findings.md): forces gcov to
+# flush its data before the known Debug-build shutdown crash, so CI can still
+# collect real coverage numbers for everything that ran before that point. Not
+# part of normal builds at all -- only added to the target when ENABLE_COVERAGE is
+# on, so it can't affect non-coverage builds (no dead code path, no link-time
+# dependency on __gcov_dump when the target isn't compiled with --coverage).
+if(ENABLE_COVERAGE)
+  list(APPEND JCEF_SRCS CoverageTestHelper.cpp)
+endif()
+
 APPEND_PLATFORM_SOURCES(JCEF_SRCS)
 source_group(jcef FILES ${JCEF_SRCS})
 

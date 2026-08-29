@@ -88,6 +88,12 @@ public class TestSetupExtension
             System.out.println("TestSetupExtension.close");
         }
 
+        // See java-cef#4 / plan/findings.md: CefApp.dispose() below reliably
+        // crashes native shutdown in Debug/coverage builds. Flush coverage data
+        // (a no-op on non-coverage builds) before that known-crashing call so a
+        // coverage CI run still captures real numbers for everything that ran.
+        CoverageTestHelper.flush();
+
         CefApp.getInstance().dispose();
 
         // Wait for CEF shutdown to complete.
