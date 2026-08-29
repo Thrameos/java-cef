@@ -56,4 +56,5 @@ Thumbs.db
 /tools/buildtools/mac/clang-format
 # Misc working directories
 /tmp
+/plan
 /tools/buildtools/win/clang-format.exe
