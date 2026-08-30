@@ -4,8 +4,21 @@
 
 #include "CefClientHandler.h"
 #include "client_handler.h"
+#include "context_menu_handler.h"
+#include "dialog_handler.h"
+#include "display_handler.h"
+#include "download_handler.h"
+#include "drag_handler.h"
+#include "focus_handler.h"
 #include "jni_util.h"
+#include "jsdialog_handler.h"
+#include "keyboard_handler.h"
+#include "life_span_handler.h"
+#include "load_handler.h"
 #include "message_router_handler.h"
+#include "print_handler.h"
+#include "render_handler.h"
+#include "request_handler.h"
 
 JNIEXPORT void JNICALL
 Java_org_cef_handler_CefClientHandler_N_1CefClientHandler_1CTOR(
@@ -32,7 +45,14 @@ Java_org_cef_handler_CefClientHandler_N_1removeContextMenuHandler(
     JNIEnv* env,
     jobject clientHandler,
     jobject contextMenuHandler) {
-  SetCefForJNIObject_sync<CefContextMenuHandler>(env, contextMenuHandler, nullptr,
+  // Use the concrete wrapper type (matching ClientHandler::GetHandler<T>'s
+  // T on the SET side, via ScopedJNIObject<T>::GetOrCreateCefObject()) --
+  // not the abstract CefContextMenuHandler interface. See
+  // Thrameos/java-cef#22's follow-up: removeWindowHandler below already did
+  // this correctly (SetCefForJNIObject_sync<WindowHandler>, not
+  // <CefWindowHandler>); every other remove*Handler here didn't, an
+  // apparent copy-paste inconsistency, not an intentional choice.
+  SetCefForJNIObject_sync<ContextMenuHandler>(env, contextMenuHandler, nullptr,
                                             "CefContextMenuHandler");
 }
 
@@ -41,7 +61,7 @@ Java_org_cef_handler_CefClientHandler_N_1removeDialogHandler(
     JNIEnv* env,
     jobject clientHandler,
     jobject dialogHandler) {
-  SetCefForJNIObject_sync<CefDialogHandler>(env, dialogHandler, nullptr,
+  SetCefForJNIObject_sync<DialogHandler>(env, dialogHandler, nullptr,
                                        "CefDialogHandler");
 }
 
@@ -50,7 +70,7 @@ Java_org_cef_handler_CefClientHandler_N_1removeDisplayHandler(
     JNIEnv* env,
     jobject clientHandler,
     jobject displayHandler) {
-  SetCefForJNIObject_sync<CefDisplayHandler>(env, displayHandler, nullptr,
+  SetCefForJNIObject_sync<DisplayHandler>(env, displayHandler, nullptr,
                                         "CefDisplayHandler");
 }
 
@@ -59,7 +79,7 @@ Java_org_cef_handler_CefClientHandler_N_1removeDownloadHandler(
     JNIEnv* env,
     jobject clientHandler,
     jobject downloadHandler) {
-  SetCefForJNIObject_sync<CefDownloadHandler>(env, downloadHandler, nullptr,
+  SetCefForJNIObject_sync<DownloadHandler>(env, downloadHandler, nullptr,
                                          "CefDownloadHandler");
 }
 
@@ -68,7 +88,7 @@ Java_org_cef_handler_CefClientHandler_N_1removeDragHandler(
     JNIEnv* env,
     jobject clientHandler,
     jobject dragHandler) {
-  SetCefForJNIObject_sync<CefDragHandler>(env, dragHandler, nullptr,
+  SetCefForJNIObject_sync<DragHandler>(env, dragHandler, nullptr,
                                      "CefDragHandler");
 }
 
@@ -77,7 +97,11 @@ Java_org_cef_handler_CefClientHandler_N_1removeFocusHandler(
     JNIEnv* env,
     jobject clientHandler,
     jobject focusHandler) {
-  SetCefForJNIObject_sync<CefFocusHandler>(env, focusHandler, nullptr,
+  // See Thrameos/java-cef#22 follow-up (comment on removeContextMenuHandler
+  // above): this exact function's crash (SIGSEGV in
+  // SetCefForJNIObjectHelper::Release, confirmed live via hs_err during
+  // ordinary browser teardown) is what surfaced this whole class of bug.
+  SetCefForJNIObject_sync<FocusHandler>(env, focusHandler, nullptr,
                                       "CefFocusHandler");
 }
 
@@ -86,7 +110,7 @@ Java_org_cef_handler_CefClientHandler_N_1removeJSDialogHandler(
     JNIEnv* env,
     jobject clientHandler,
     jobject jsdialogHandler) {
-  SetCefForJNIObject_sync<CefJSDialogHandler>(env, jsdialogHandler, nullptr,
+  SetCefForJNIObject_sync<JSDialogHandler>(env, jsdialogHandler, nullptr,
                                          "CefJSDialogHandler");
 }
 
@@ -95,7 +119,7 @@ Java_org_cef_handler_CefClientHandler_N_1removeKeyboardHandler(
     JNIEnv* env,
     jobject clientHandler,
     jobject keyboardHandler) {
-  SetCefForJNIObject_sync<CefKeyboardHandler>(env, keyboardHandler, nullptr,
+  SetCefForJNIObject_sync<KeyboardHandler>(env, keyboardHandler, nullptr,
                                          "CefKeyboardHandler");
 }
 
@@ -104,7 +128,7 @@ Java_org_cef_handler_CefClientHandler_N_1removeLifeSpanHandler(
     JNIEnv* env,
     jobject clientHandler,
     jobject lifeSpanHandler) {
-  SetCefForJNIObject_sync<CefLifeSpanHandler>(env, lifeSpanHandler, nullptr,
+  SetCefForJNIObject_sync<LifeSpanHandler>(env, lifeSpanHandler, nullptr,
                                          "CefLifeSpanHandler");
 }
 
@@ -113,7 +137,7 @@ Java_org_cef_handler_CefClientHandler_N_1removeLoadHandler(
     JNIEnv* env,
     jobject clientHandler,
     jobject loadHandler) {
-  SetCefForJNIObject_sync<CefLoadHandler>(env, loadHandler, nullptr,
+  SetCefForJNIObject_sync<LoadHandler>(env, loadHandler, nullptr,
                                      "CefLoadHandler");
 }
 
@@ -122,7 +146,7 @@ Java_org_cef_handler_CefClientHandler_N_1removePrintHandler(
     JNIEnv* env,
     jobject clientHandler,
     jobject printHandler) {
-  SetCefForJNIObject_sync<CefPrintHandler>(env, printHandler, nullptr,
+  SetCefForJNIObject_sync<PrintHandler>(env, printHandler, nullptr,
                                       "CefPrintHandler");
 }
 
@@ -143,7 +167,7 @@ Java_org_cef_handler_CefClientHandler_N_1removeRenderHandler(
     JNIEnv* env,
     jobject clientHandler,
     jobject renderHandler) {
-  SetCefForJNIObject_sync<CefRenderHandler>(env, renderHandler, nullptr,
+  SetCefForJNIObject_sync<RenderHandler>(env, renderHandler, nullptr,
                                        "CefRenderHandler");
 }
 
@@ -152,7 +176,7 @@ Java_org_cef_handler_CefClientHandler_N_1removeRequestHandler(
     JNIEnv* env,
     jobject clientHandler,
     jobject requestHandler) {
-  SetCefForJNIObject_sync<CefRequestHandler>(env, requestHandler, nullptr,
+  SetCefForJNIObject_sync<RequestHandler>(env, requestHandler, nullptr,
                                         "CefRequestHandler");
 }
 
