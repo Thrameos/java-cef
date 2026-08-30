@@ -4,12 +4,12 @@
 
 package tests.junittests;
 
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.cef.browser.CefBrowser;
 import org.cef.browser.CefDevToolsClient;
-import org.junit.jupiter.api.Disabled;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 
@@ -17,37 +17,38 @@ import org.junit.jupiter.api.extension.ExtendWith;
 // devtools_message_observer.cpp and CefRegistration_N.cpp, previously
 // untested -- the package-private CefDevToolsMessageObserver interface these
 // wrap isn't directly implementable from tests.junittests, but the public
-// CefDevToolsClient wrapper is). Calls the real "Browser.getVersion" DevTools
-// protocol method (no page/network dependency).
+// CefDevToolsClient wrapper is).
 //
-// @Disabled -- IMPORTANT, do not remove without extreme caution: this test
-// causes a genuine UNRECOVERABLE hang, confirmed via an isolated run wrapped
-// in a hard external `timeout -k 5 45` (SIGTERM then SIGKILL) -- even
-// SIGKILL fallback was needed, i.e. it wasn't just slow, something was
-// genuinely stuck. TestFrame's own 30s watchdog (a java.util.Timer-based
-// forced browser close, scheduled via SwingUtilities.invokeLater onto the
-// AWT/CEF UI thread) never got a chance to run, suggesting the AWT/CEF UI
-// thread itself may be blocked, not just the DevTools call's own completion
-// -- meaning nothing in this harness can safely recover from running this
-// test. Filed as Thrameos/java-cef#12 (also covers the analogous
-// browser.print() hang, see CefPrintHandlerTest.java's commented-out
-// browserPrintInvokesPrintStartSettingsAndDialog draft in that file's git
-// history/plan/roadmap.md for that one -- not restored here as a separate
-// class since one confirmed unrecoverable-hang reproducer per root cause is
-// enough).
-//
-// Retested 2026-08-29 via a standalone diagnostic (not this file): tried
-// waiting for onLoadingStateChange(isLoading=false) instead of calling
-// getDevToolsClient() from onAfterCreated, AND holding a strong reference
-// to the CefDevToolsClient as a field for the async call's duration
-// (originally only a local variable, invisible to the whenComplete()
-// lambda -- a real bug in its own right, but not the cause of this hang).
-// Still hung past a 45s external timeout, needing SIGKILL. Unlike issues
-// #17/#18/#12-repro-2, no "wrong technique" explanation found so far.
-@Disabled("UNRECOVERABLE HANG, not just a slow/bounded failure -- see "
-        + "Thrameos/java-cef#12. Do not run without a hard external timeout "
-        + "wrapper (e.g. `timeout -k 5 45`), and do not remove @Disabled as "
-        + "part of a normal suite run.")
+// ROOT CAUSE FOUND 2026-08-29 for the long-standing Thrameos/java-cef#12
+// "unrecoverable hang" on this path: it was specific to calling
+// "Browser.getVersion" (a *browser*-domain DevTools command). A standalone
+// diagnostic (DiagDevToolsAttach, since deleted -- see plan/roadmap.md for
+// the full transcript) added CefDevToolsClient.isAgentAttached() polling
+// from a plain, non-AWT thread and an independent watchdog, and found:
+//   - The DevTools agent attaches near-instantly (within ~2ms of the first
+//     message send), exactly as CefDevToolsMessageObserver's own
+//     documentation predicts.
+//   - "Browser.getVersion" specifically then NEVER receives a matching
+//     OnDevToolsMethodResult callback -- confirmed not a race (explicit
+//     non-zero incrementing message IDs, matching CEF's own ceftests
+//     technique in devtools_message_unittest.cc, made no difference).
+//   - Substituting a *page*-domain command ("Page.enable", the same command
+//     CEF's own ceftests devtools_message_unittest.cc exercises) completes
+//     in ~2ms with no hang at all, across repeated runs.
+//   - The AWT/CEF UI thread is NOT stuck: TestFrame's own watchdog can
+//     cleanly force-close the browser (windowClosing/doClose/onBeforeClose
+//     all fire normally) even when the Browser.getVersion call is left
+//     hanging -- correcting this file's older note that the UI thread
+//     itself might be blocked.
+// Likely explanation: JCEF forces CEF_RUNTIME_STYLE_ALLOY for all browsers
+// (see the comment in native/CefBrowser_N.cpp's create()), and the DevTools
+// Browser-domain command handler may not be fully wired for an
+// Alloy-runtime-style, off-screen-rendered CefBrowserHost in this CEF
+// version -- Page-domain commands, which are tied to the renderer/page
+// rather than the browser-process-level Browser domain, are unaffected.
+// This is a real CEF/JCEF integration limitation, not a test-harness bug;
+// documented on Thrameos/java-cef#12 rather than filed as a wholly new
+// issue, since it's the root cause of that one.
 @ExtendWith(TestSetupExtension.class)
 class CefDevToolsClientTest {
     private static final String TEST_URL = "http://test.com/devtools_client.html";
@@ -56,8 +57,12 @@ class CefDevToolsClientTest {
     void executeDevToolsMethodReturnsRealResult() {
         String[] result = {null};
         boolean[] gotResult = {false};
+        boolean[] wasAttachedBefore = {true};
+        boolean[] wasAttachedAfter = {false};
 
         TestFrame frame = new TestFrame() {
+            CefDevToolsClient client;
+
             @Override
             protected void setupTest() {
                 addResource(TEST_URL, "<html><body>devtools test</body></html>", "text/html");
@@ -68,22 +73,27 @@ class CefDevToolsClientTest {
             @Override
             public void onAfterCreated(CefBrowser browser) {
                 super.onAfterCreated(browser);
-                CefDevToolsClient client = browser.getDevToolsClient();
-                client.executeDevToolsMethod("Browser.getVersion")
-                        .whenComplete((res, ex) -> {
-                            if (ex == null) {
-                                result[0] = res;
-                                gotResult[0] = true;
-                            }
-                            terminateTest();
-                        });
+                client = browser.getDevToolsClient();
+                wasAttachedBefore[0] = client.isAgentAttached();
+                // "Page.enable" is a page-domain command, unlike the
+                // browser-domain "Browser.getVersion" this test used to
+                // call (see the class comment for why that hung).
+                client.executeDevToolsMethod("Page.enable").whenComplete((res, ex) -> {
+                    if (ex == null) {
+                        result[0] = res;
+                        gotResult[0] = true;
+                    }
+                    wasAttachedAfter[0] = client.isAgentAttached();
+                    terminateTest();
+                });
             }
         };
 
         frame.awaitCompletion();
 
+        assertFalse(wasAttachedBefore[0], "Agent reported attached before any message was sent");
         assertTrue(gotResult[0], "executeDevToolsMethod never completed successfully");
         assertNotNull(result[0]);
-        assertTrue(result[0].length() > 0);
+        assertTrue(wasAttachedAfter[0], "Agent did not report attached after a message round-trip");
     }
 }
