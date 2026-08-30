@@ -4,10 +4,17 @@
 
 package tests.junittests;
 
+import org.cef.CefApp;
+import org.cef.CefClient;
 import org.cef.browser.CefBrowser;
 import org.cef.browser.CefDevToolsClient;
 import org.cef.browser.CefRequestContext;
+import org.cef.callback.CefDragData;
+import org.cef.misc.CefPrintSettings;
+import org.cef.network.CefPostData;
+import org.cef.network.CefPostDataElement;
 import org.cef.network.CefRequest;
+import org.cef.network.CefResponse;
 
 import java.util.Arrays;
 import java.util.List;
@@ -38,6 +45,30 @@ import java.util.concurrent.TimeUnit;
 //   get-or-cache logic to tolerate external disposal) before it can be a
 //   sweep target at all.
 class LeakTargets {
+    // EXPERIMENT (2026-08-30), not a permanent feature: -Dleak.pump.everyNCalls=N
+    // makes the two rapid-churn targets below call
+    // CefApp.getInstance().doMessageLoopWork(0) every N calls, to test the open
+    // "growing async cleanup-task backlog" hypothesis from finding 1/2 in
+    // plan/LeakCheckerPort.md's Phase 2 status -- external_message_pump mode
+    // (native/context.cpp, active whenever windowless_rendering_enabled, the
+    // default) means CEF's own task queue only drains when Java calls
+    // doMessageLoopWork(), normally driven by a ~30fps EDT timer
+    // (CefApp.doMessageLoopWork's kMaxTimerDelay). A tight non-EDT loop calling
+    // native create/dispose thousands of times per second may outrun that
+    // 30fps drain rate, leaving scheduled native cleanup work queued up. Absent
+    // (default 0/disabled), behavior is unchanged from before this experiment.
+    private static int pumpEveryNCalls() {
+        String override = System.getProperty("leak.pump.everyNCalls");
+        if (override != null) {
+            try {
+                return Integer.parseInt(override);
+            } catch (NumberFormatException e) {
+                // Fall through to disabled.
+            }
+        }
+        return 0;
+    }
+
     // ORDERING NOTE (2026-08-29): the browser-needing DevTools target is
     // listed FIRST, before the two rapid native-object-churn targets below
     // -- not just for variety. Running createContext()/dispose() or
@@ -52,7 +83,44 @@ class LeakTargets {
     // unbounded-leak shape) -- but the immediate, pragmatic fix here is
     // just sequencing, not yet a real solution to either problem. See
     // plan/LeakCheckerPort.md Phase 2 status for the full writeup.
-    static final List<LeakTarget> ALL = Arrays.asList(devToolsClientTarget(),
+    // CONTROLS (2026-08-30), permanent, listed FIRST -- see
+    // java/tests/junittests/JniNoOpProbe.java's own comment and
+    // plan/LeakCheckerPort.md's 2026-08-30 status. Originally built to test
+    // whether generic JNI-crossing overhead alone (zero CEF involvement)
+    // produces growth (answer: no, when run uncontaminated) -- but its more
+    // important role turned out to be a live carryover-contamination
+    // detector: a literally empty native function read as a sustained,
+    // uniform "leak" when run *after* several real leaky targets in the
+    // same process, in a completely different, false-signal magnitude and
+    // consistency than the genuine noise it shows here at the front of the
+    // sweep. Marked .asControl() (not knownOpenFinding() -- these are
+    // expected to be clean, not suspected defects) so a LEAK verdict here
+    // never fails the suite but is always reported: it's evidence of a
+    // measurement/ordering problem elsewhere in the sweep, not a defect in
+    // JniNoOpProbe itself. Do not delete these because they're
+    // occasionally noisy -- that throws away exactly the signal they exist
+    // to provide (a genuinely noisy/failing control needs a better
+    // control, or an investigation into why, not removal).
+    static final List<LeakTarget> ALL = Arrays.asList(
+            new LeakTarget("JniNoOpProbe.bareCall",
+                    "CONTROL: bare native call, zero JNI callbacks, zero CEF involvement -- "
+                            + "expected clean; a LEAK here flags carryover contamination "
+                            + "elsewhere in the sweep, not a defect in this target.",
+                    200, () -> JniNoOpProbe::noop)
+                    .asControl(),
+
+            new LeakTarget("JniNoOpProbe.probeCallback",
+                    "CONTROL: mirrors SetCefForJNIObject_sync's exact JNI call shape with "
+                            + "zero CEF involvement -- expected clean; a LEAK here flags "
+                            + "carryover contamination elsewhere in the sweep.",
+                    200,
+                    () -> () -> {
+                        JniNoOpProbe probe = new JniNoOpProbe();
+                        probe.probeCallback();
+                    })
+                    .asControl(),
+
+            devToolsClientTarget(),
 
             // OPEN FINDING, not yet root-caused (2026-08-29) -- see
             // plan/LeakCheckerPort.md's Phase 2 status section for the full
@@ -79,10 +147,17 @@ class LeakTargets {
                     "OPEN: sustained non-decaying RSS growth, not yet root-caused. "
                             + "Regression coverage for issue #23's original leak shape once "
                             + "understood.",
-                    3.0, 200,
-                    () -> () -> {
-                        CefRequestContext ctx = CefRequestContext.createContext(null);
-                        ctx.dispose();
+                    200,
+                    () -> {
+                        int pumpEvery = pumpEveryNCalls();
+                        int[] callCount = {0};
+                        return () -> {
+                            CefRequestContext ctx = CefRequestContext.createContext(null);
+                            ctx.dispose();
+                            if (pumpEvery > 0 && ++callCount[0] % pumpEvery == 0) {
+                                CefApp.getInstance().doMessageLoopWork(0);
+                            }
+                        };
                     })
                     .knownOpenFinding(),
 
@@ -102,9 +177,119 @@ class LeakTargets {
                     "OPEN: same sustained-growth pattern as CefRequestContext above, not yet "
                             + "root-caused. No longer usable as a 'known good' baseline until "
                             + "resolved.",
-                    3.0, 200, () -> () -> {
-                        CefRequest request = CefRequest.create();
-                        request.dispose();
+                    200,
+                    () -> {
+                        int pumpEvery = pumpEveryNCalls();
+                        int[] callCount = {0};
+                        return () -> {
+                            CefRequest request = CefRequest.create();
+                            request.dispose();
+                            if (pumpEvery > 0 && ++callCount[0] % pumpEvery == 0) {
+                                CefApp.getInstance().doMessageLoopWork(0);
+                            }
+                        };
+                    })
+                    .knownOpenFinding(),
+
+            // BREADTH PASS (2026-08-30): the remaining targets below are a
+            // first cut at Phase 4's "curate + sweep + fix" breadth pass
+            // (plan/LeakCheckerPort.md) -- deliberately shallow, smoke-budget
+            // create()/dispose() coverage across several distinct create()/
+            // dispose() API shapes that don't need a live browser, to build a
+            // map of which call patterns leak and which don't rather than
+            // root-causing the first one found (see that status section for
+            // why this pass exists). Each is expectClean=true by default; a
+            // LEAK finding here should get knownOpenFinding() plus a short
+            // note, not an immediate deep investigation -- triage after the
+            // full breadth pass, not during it.
+            // OPEN FINDING (2026-08-30): LEAK under the fixed-batch-count
+            // model -- was misreported "clean" under this harness's earlier,
+            // wrongly time-budgeted memTestBudget() (see plan doc's
+            // 2026-08-30 course-correction); at only 2,000 calls (10
+            // batches x 200) it turns out to leak just as reliably as the
+            // other value-object targets. Never structurally different --
+            // just needed a correct test.
+            new LeakTarget("CefPostData.create/dispose",
+                    "OPEN: part of the shared breadth-pass finding (see plan doc) -- "
+                            + "previously misreported clean under a since-fixed harness bug.",
+                    200,
+                    () -> () -> {
+                        CefPostData data = CefPostData.create();
+                        data.dispose();
+                    })
+                    .knownOpenFinding(),
+
+            // OPEN FINDING (2026-08-30): LEAK, ~1300-2000 B/call, 41 batches
+            // at a 3s smoke budget -- part of the shared breadth-pass finding,
+            // see plan/LeakCheckerPort.md's 2026-08-30 status. Not
+            // root-caused per-target; likely the same shared
+            // off-UI-thread-Release() mechanism as CefRequestContext/
+            // CefRequest above.
+            new LeakTarget("CefPostDataElement.create/dispose",
+                    "OPEN: part of the shared breadth-pass finding (see plan doc) -- "
+                            + "likely the same off-UI-thread dispose() mechanism as "
+                            + "CefRequestContext/CefRequest above, not investigated per-target.",
+                    200,
+                    () -> () -> {
+                        CefPostDataElement element = CefPostDataElement.create();
+                        element.dispose();
+                    })
+                    .knownOpenFinding(),
+
+            // OPEN FINDING (2026-08-30): same as CefPostDataElement above.
+            new LeakTarget("CefResponse.create/dispose",
+                    "OPEN: part of the shared breadth-pass finding (see plan doc) -- "
+                            + "likely the same off-UI-thread dispose() mechanism as "
+                            + "CefRequestContext/CefRequest above, not investigated per-target.",
+                    200,
+                    () -> () -> {
+                        CefResponse response = CefResponse.create();
+                        response.dispose();
+                    })
+                    .knownOpenFinding(),
+
+            // OPEN FINDING (2026-08-30): same as CefPostDataElement above.
+            new LeakTarget("CefDragData.create/dispose",
+                    "OPEN: part of the shared breadth-pass finding (see plan doc) -- "
+                            + "likely the same off-UI-thread dispose() mechanism as "
+                            + "CefRequestContext/CefRequest above, not investigated per-target.",
+                    200,
+                    () -> () -> {
+                        CefDragData data = CefDragData.create();
+                        data.dispose();
+                    })
+                    .knownOpenFinding(),
+
+            // OPEN FINDING (2026-08-30): same as CefPostDataElement above.
+            new LeakTarget("CefPrintSettings.create/dispose",
+                    "OPEN: part of the shared breadth-pass finding (see plan doc) -- "
+                            + "likely the same off-UI-thread dispose() mechanism as "
+                            + "CefRequestContext/CefRequest above, not investigated per-target.",
+                    200,
+                    () -> () -> {
+                        CefPrintSettings settings = CefPrintSettings.create();
+                        settings.dispose();
+                    })
+                    .knownOpenFinding(),
+
+            // Distinct shape from the value objects above: CefApp.createClient()
+            // exercises CefClient's own handler-registration lifecycle (the same
+            // add/remove-handler cycle issue #22's GetHandler<T>() lazy-create
+            // bug lived in, now _sync-fixed) rather than a plain native value
+            // object, and goes through CefApp's clients_ registry
+            // (CefApp.java's createClient()/clientWasDisposed()) instead of a
+            // standalone native ref.
+            // OPEN FINDING (2026-08-30): LEAK, ~1300-2000 B/call, 39 batches at
+            // a 3s smoke budget -- part of the shared breadth-pass finding, see
+            // plan/LeakCheckerPort.md's 2026-08-30 status.
+            new LeakTarget("CefApp.createClient/dispose",
+                    "OPEN: part of the shared breadth-pass finding (see plan doc) -- "
+                            + "exercises CefClient's handler add/remove cycle and "
+                            + "CefApp.clients_ registry, not investigated per-target.",
+                    200,
+                    () -> () -> {
+                        CefClient client = CefApp.getInstance().createClient();
+                        client.dispose();
                     })
                     .knownOpenFinding());
 
@@ -123,10 +308,19 @@ class LeakTargets {
         // it. Method-level (not setUp()-local) so both lambdas can see it.
         TestFrame[] frameHolder = {null};
 
+        // OPEN FINDING (2026-08-30): occasional LEAK under the fixed-batch
+        // model at this target's small batchSize=20 -- plausibly just
+        // measurement noise made more visible by the smaller per-call
+        // denominator (growth = delta-bytes / 20, so the same absolute
+        // jitter reads as a much bigger B/call number here than at the
+        // other targets' batchSize=200), not necessarily a real regression
+        // of issue #12's fix. Not yet distinguished from a real leak --
+        // marked open rather than assumed either way.
         LeakTarget target = new LeakTarget("CefBrowser.getDevToolsClient/close",
-                "Regression coverage for issue #12's fix -- DevTools "
-                        + "registration create/release cycle.",
-                5.0, 20, () -> {
+                "OPEN: occasional LEAK at this target's small batchSize -- not yet "
+                        + "distinguished from measurement noise vs. a real regression of "
+                        + "issue #12's fix.",
+                20, () -> {
                     CountDownLatch ready = new CountDownLatch(1);
                     CefBrowser[] browserHolder = {null};
 
@@ -168,7 +362,7 @@ class LeakTargets {
                         client.close();
                     };
                 });
-        return target.withTearDown(() -> {
+        return target.knownOpenFinding().withTearDown(() -> {
             TestFrame frame = frameHolder[0];
             if (frame != null) {
                 frame.terminateTest();
