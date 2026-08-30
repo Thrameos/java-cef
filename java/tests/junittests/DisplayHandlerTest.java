@@ -6,6 +6,7 @@ package tests.junittests;
 
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import org.cef.CefSettings;
 import org.cef.browser.CefBrowser;
 import org.cef.browser.CefFrame;
 import org.cef.handler.CefDisplayHandlerAdapter;
@@ -98,5 +99,44 @@ class DisplayHandlerTest {
         frame.awaitCompletion();
 
         assertTrue(gotCallback_);
+    }
+
+    @Test
+    void onConsoleMessage() {
+        String consoleUrl = "http://test.com/console_test.html";
+        String consoleContent = "<html><body><script>"
+                + "console.log('jcef-console-test-marker');"
+                + "</script></body></html>";
+        boolean[] gotMessage = {false};
+
+        TestFrame frame = new TestFrame() {
+            @Override
+            protected void setupTest() {
+                client_.addDisplayHandler(new CefDisplayHandlerAdapter() {
+                    @Override
+                    public boolean onConsoleMessage(CefBrowser browser,
+                            CefSettings.LogSeverity level, String message, String source,
+                            int line) {
+                        // See the comment in onTitleChange() above: treat gotMessage
+                        // as an idempotency guard rather than throwing from inside
+                        // this native callback.
+                        if (gotMessage[0] || !message.contains("jcef-console-test-marker")) {
+                            return false;
+                        }
+                        gotMessage[0] = true;
+                        terminateTest();
+                        return false;
+                    }
+                });
+
+                addResource(consoleUrl, consoleContent, "text/html");
+                createBrowser(consoleUrl, true /* useOSR */);
+                super.setupTest();
+            }
+        };
+
+        frame.awaitCompletion();
+
+        assertTrue(gotMessage[0], "onConsoleMessage never fired for the page's console.log()");
     }
 }
