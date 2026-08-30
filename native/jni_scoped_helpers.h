@@ -950,16 +950,27 @@ bool SetCefForJNIObject(JNIEnv* env,
   jlong previousValue = 0;
   JNI_CALL_METHOD(env, obj, "getNativeRef", "(Ljava/lang/String;)J", Long,
                   previousValue, identifer.get());
-  if (previousValue != 0) {
-    // Remove a reference from the previous base object.
-    SetCefForJNIObjectHelper::Release(reinterpret_cast<T*>(previousValue));
-  }
 
+  // IMPORTANT: update the Java-side stored pointer BEFORE releasing the
+  // previous object, not after. If Release() ran first, there is a window
+  // (between Release() destroying the previous object and setNativeRef()
+  // clearing/replacing the stored pointer) where the Java side still holds
+  // and can hand out a pointer to an already-destroyed object -- a
+  // use-after-free reachable from any concurrent native callback that reads
+  // this same JNI object's native ref during that window. See
+  // Thrameos/java-cef#22 (a SIGSEGV in SetCefForJNIObjectHelper::Release
+  // dereferencing a garbage pointer during ordinary browser/client
+  // teardown, consistent with exactly this kind of stale-pointer read).
   JNI_CALL_VOID_METHOD(env, obj, "setNativeRef", "(Ljava/lang/String;J)V",
                        identifer.get(), (jlong)base);
   if (base) {
     // Add a reference to the new base object.
     SetCefForJNIObjectHelper::AddRef(base);
+  }
+  if (previousValue != 0) {
+    // Remove a reference from the previous base object, now that the
+    // Java-side pointer no longer refers to it.
+    SetCefForJNIObjectHelper::Release(reinterpret_cast<T*>(previousValue));
   }
   return true;
 }
@@ -977,6 +988,81 @@ T* GetCefFromJNIObject(JNIEnv* env, jobject obj, const char* varName) {
   if (previousValue != 0)
     return reinterpret_cast<T*>(previousValue);
   return nullptr;
+}
+
+// Locking variants of SetCefForJNIObject/GetCefFromJNIObject. The plain
+// versions above are safe for the single-writer-at-dispose-time /
+// single-reader-at-call-time pattern most call sites use, but are not
+// atomic against a concurrent reader observing the native pointer exactly
+// while it's being replaced -- see Thrameos/java-cef#22. These variants
+// call through to lockAndGetNativeRef()/unlock() (see CefNativeAdapter.java)
+// instead of getNativeRef()/setNativeRef() directly, so the read-modify
+// sequence is atomic with respect to any other thread going through the
+// same lock. Use for object types implicated in a confirmed
+// teardown-race crash rather than switching every call site over
+// speculatively -- see the call sites' own comments for which crash each
+// one addresses.
+
+// Set the CEF base object for an existing JNI object, atomically with
+// respect to concurrent GetCefFromJNIObject_sync() calls on the same
+// object.
+template <class T>
+bool SetCefForJNIObject_sync(JNIEnv* env,
+                             jobject obj,
+                             T* base,
+                             const char* varName) {
+  if (!obj)
+    return false;
+
+  ScopedJNIString identifer(env, varName);
+  jlong previousValue = 0;
+  JNI_CALL_METHOD(env, obj, "lockAndGetNativeRef", "(Ljava/lang/String;)J",
+                  Long, previousValue, identifer.get());
+
+  JNI_CALL_VOID_METHOD(env, obj, "setNativeRef", "(Ljava/lang/String;J)V",
+                       identifer.get(), (jlong)base);
+  if (base) {
+    SetCefForJNIObjectHelper::AddRef(base);
+  }
+
+  // Release the lock before releasing the previous object's reference --
+  // Release() can run arbitrary CEF teardown code and must not be called
+  // while still holding this Java-side lock (risk of deadlock against
+  // anything that re-enters back into this same object).
+  JNI_CALL_VOID_METHOD(env, obj, "unlock", "(Ljava/lang/String;)V",
+                       identifer.get());
+
+  if (previousValue != 0) {
+    SetCefForJNIObjectHelper::Release(reinterpret_cast<T*>(previousValue));
+  }
+  return true;
+}
+
+// Retrieve the CEF base object from an existing JNI object, atomically with
+// respect to a concurrent SetCefForJNIObject_sync() call on the same
+// object -- returns a CefRefPtr (which has already taken its own reference
+// before the lock is released) rather than a raw pointer, so the caller
+// always has a safe-to-use reference even if the object is disposed
+// immediately afterward.
+template <class T>
+CefRefPtr<T> GetCefFromJNIObject_sync(JNIEnv* env, jobject obj, const char* varName) {
+  if (!obj)
+    return CefRefPtr<T>();
+
+  ScopedJNIString identifer(env, varName);
+  jlong value = 0;
+  JNI_CALL_METHOD(env, obj, "lockAndGetNativeRef", "(Ljava/lang/String;)J",
+                  Long, value, identifer.get());
+
+  // The CefRefPtr constructor calls AddRef() on the underlying object while
+  // the lock is still held, so a concurrent SetCefForJNIObject_sync() call
+  // (blocked on the same lock) cannot Release() the object until after this
+  // reference has been safely taken.
+  CefRefPtr<T> result(reinterpret_cast<T*>(value));
+
+  JNI_CALL_VOID_METHOD(env, obj, "unlock", "(Ljava/lang/String;)V",
+                       identifer.get());
+  return result;
 }
 
 #endif  // JCEF_NATIVE_JNI_SCOPED_HELPERS_H_

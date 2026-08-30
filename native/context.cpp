@@ -258,6 +258,17 @@ void Context::DoMessageLoopWork() {
 void Context::Shutdown() {
   DCHECK(thread_checker_.CalledOnValidThread());
 
+  // Make Shutdown() idempotent: guard against being invoked more than once
+  // (e.g. a race between two paths that each believe they're the last
+  // client/browser being disposed -- see CefApp.java's shutdown(), which is
+  // scheduled via SwingUtilities.invokeLater() and so is not atomic with
+  // the state check that triggers it). A second CefShutdown() call is not
+  // safe to make. See Thrameos/java-cef#22/#23.
+  static bool shutdown_called = false;
+  if (shutdown_called)
+    return;
+  shutdown_called = true;
+
   // Clear scheme handler factories on shutdown to avoid refcount DCHECK.
   CefClearSchemeHandlerFactories();
 

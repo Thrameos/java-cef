@@ -76,11 +76,22 @@ class CefRequestContextHandlerTest {
     void handlerServesContentThroughARequestContext() {
         boolean[] gotHandlerCallback = {false};
         boolean[] gotTitle = {false};
+        // A non-global CefRequestContext (unlike the shared global one every
+        // other test implicitly uses via TestFrame's default browser
+        // creation) owns its own underlying native CefBrowserContext, which
+        // must be explicitly disposed -- otherwise it's still registered
+        // when CefShutdown() runs at the very end of the whole suite,
+        // tripping a real CEF-internal DCHECK(all_.empty()) in
+        // browser_context.cc. Hoisted out of setupTest() so it can be
+        // disposed after awaitCompletion() returns, once the browser itself
+        // (which was created with this context) has already closed --
+        // see Thrameos/java-cef#23.
+        CefRequestContext[] context = {null};
 
         TestFrame frame = new TestFrame() {
             @Override
             protected void setupTest() {
-                CefRequestContext context =
+                context[0] =
                         CefRequestContext.createContext(new CefRequestContextHandlerAdapter() {
                             @Override
                             public CefResourceRequestHandler getResourceRequestHandler(
@@ -155,7 +166,7 @@ class CefRequestContextHandlerTest {
                 // CefRequestContext so this test's CefRequestContextHandler (not
                 // TestFrame's own getResourceRequestHandler) serves the request.
                 browser_ = client_.createBrowser(TEST_URL, true /* useOSR */,
-                        false /* isTransparent */, context);
+                        false /* isTransparent */, context[0]);
                 getContentPane().add(browser_.getUIComponent(), BorderLayout.CENTER);
                 pack();
                 setSize(800, 600);
@@ -164,6 +175,8 @@ class CefRequestContextHandlerTest {
         };
 
         frame.awaitCompletion();
+
+        if (context[0] != null) context[0].dispose();
 
         assertTrue(gotHandlerCallback[0],
                 "CefRequestContextHandler.getResourceRequestHandler was never invoked");
