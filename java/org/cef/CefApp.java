@@ -475,6 +475,17 @@ public class CefApp extends CefAppHandlerAdapter {
             public void run() {
                 System.out.println("shutdown on " + Thread.currentThread());
 
+                // Cancel any pending message-pump Timer tick before it can
+                // fire after native shutdown below. Belt-and-suspenders
+                // alongside doMessageLoopWork()'s own TERMINATED check (see
+                // that method's comment for the full race this guards
+                // against) -- stopping it here closes the window even
+                // earlier, before N_Shutdown() runs at all.
+                if (workTimer_ != null) {
+                    workTimer_.stop();
+                    workTimer_ = null;
+                }
+
                 // Shutdown native CEF.
                 N_Shutdown();
 
@@ -521,6 +532,29 @@ public class CefApp extends CefAppHandlerAdapter {
                             // Timer has timed out.
                             workTimer_.stop();
                             workTimer_ = null;
+
+                            // Same guard as the outer invokeLater Runnable's own
+                            // check above -- necessary here too, not redundant.
+                            // This Timer is scheduled independently (up to
+                            // ~33ms in the future) and shutdown() below doesn't
+                            // cancel a pending one, so a tick can still fire
+                            // after native shutdown has already destroyed the
+                            // singleton Context (Context::Destroy() in
+                            // N_Shutdown() -- see native/CefApp.cpp). Without
+                            // this check, N_DoMessageLoopWork() calls
+                            // Context::GetInstance()->DoMessageLoopWork() on a
+                            // null Context* (GetInstance() returns null post-
+                            // Destroy()) -- silently harmless in Release
+                            // (DoMessageLoopWork()'s only DCHECK is compiled
+                            // out there, so the null `this` is never actually
+                            // dereferenced), but a real SIGSEGV in Debug
+                            // builds when that DCHECK evaluates
+                            // thread_checker_.CalledOnValidThread() on the
+                            // freed object -- confirmed via a live crash
+                            // (pthread_mutex_lock fault inside
+                            // Context::DoMessageLoopWork()) hit intermittently
+                            // in this repo's Debug/coverage test suite.
+                            if (getState() == CefAppState.TERMINATED) return;
 
                             N_DoMessageLoopWork();
 
