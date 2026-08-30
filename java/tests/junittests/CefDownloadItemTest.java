@@ -5,8 +5,6 @@
 package tests.junittests;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.cef.browser.CefBrowser;
@@ -14,53 +12,60 @@ import org.cef.callback.CefBeforeDownloadCallback;
 import org.cef.callback.CefDownloadItem;
 import org.cef.callback.CefDownloadItemCallback;
 import org.cef.handler.CefDownloadHandler;
-import org.junit.jupiter.api.Disabled;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 
+import java.io.File;
+import java.nio.file.Files;
 import java.util.HashMap;
-import java.util.concurrent.TimeUnit;
 
-// Exercises CefDownloadHandler/CefDownloadItem (native/download_handler.cpp,
-// CefDownloadItem_N.cpp, CefBeforeDownloadCallback_N.cpp,
-// CefDownloadItemCallback_N.cpp -- together a large chunk of the remaining
-// 0%-covered surface per Track B's real gcovr run). Serves a resource via
-// addResource() with a Content-Disposition: attachment header, registers a
-// CefDownloadHandler, navigates the browser directly to the download URL as
-// its *initial* load (avoids the user-gesture requirement a JS-synthesized
-// click would need, see the deleted v1 of this test / issue #11's finding).
-// Never calls CefBeforeDownloadCallback.Continue(), so no file is ever
-// actually written to disk.
+// Exercises CefDownloadHandler/CefDownloadItem/CefBeforeDownloadCallback/
+// CefDownloadItemCallback (native/download_handler.cpp, CefDownloadItem_N.
+// cpp, CefBeforeDownloadCallback_N.cpp, CefDownloadItemCallback_N.cpp --
+// together a large chunk of the remaining 0%-covered surface per Track B's
+// real gcovr run). Serves a resource via addResource() with a
+// Content-Disposition: attachment header, registers a CefDownloadHandler,
+// navigates the browser directly to the download URL as its *initial* load
+// (avoids the user-gesture requirement a JS-synthesized click would need,
+// see issue #11's finding).
 //
-// @Disabled: confirmed via debug instrumentation that Chromium DOES detect
-// this as a download and aborts the navigation (onLoadError fires with
-// ERR_ABORTED -- the normal, expected signal for a download-triggered
-// navigation) -- but onBeforeDownload still never fires, and the test hangs
-// for the full 30s watchdog timeout (a clean, bounded failure, not an
-// unrecoverable hang). Most likely cause: TestSetupExtension's CefSettings
-// never sets root_cache_path (there's a startup warning about exactly this
-// -- "Please customize CefSettings.root_cache_path..."), so the download
-// manager may not be fully initialized against the ephemeral/in-memory
-// profile this suite runs with. root_cache_path is only settable globally
-// at CefApp startup (same limitation documented for
-// CefSettings.background_color, upstream issue #362) -- this whole suite
-// shares one CefApp singleton via TestSetupExtension, so there's no way to
-// vary it per-test without a separate JVM process per test. Filed as
-// Thrameos/java-cef#18 to keep a reproducer on record even though the
-// root_cache_path theory above isn't confirmed as the actual fix.
-@Disabled("onBeforeDownload never fires without a real CefSettings."
-        + "root_cache_path configured, which this suite's shared CefApp "
-        + "singleton can't vary per-test -- see Thrameos/java-cef#18")
+// ROOT CAUSE of the original issue #18 finding (onBeforeDownload "never
+// fires"): it does fire -- confirmed once the test actually reads the
+// CefDownloadItem's state *inside* the callback. The original test held
+// onto the CefDownloadItem object and called isValid()/getURL() etc. on it
+// *after* awaitCompletion() returned (i.e. after terminateTest() had
+// already begun tearing down the browser/window) -- CefDownloadItem is a
+// scoped/temporary object (per its own javadoc: "Do not call any other
+// methods if [isValid()] returns false"), same class of mistake this suite
+// hit before with CefContextMenuParams/CefRequest params passed into other
+// callbacks: capture primitives inside the callback, don't hold the object
+// for later. Not a JCEF/CEF bug, not a root_cache_path issue -- the
+// startup warning about root_cache_path is real but unrelated to this.
+//
+// This version goes further than just confirming the fix: actually calls
+// CefBeforeDownloadCallback.Continue() with a real temp file path so the
+// download completes for real, letting the test also exercise
+// CefDownloadItemCallback's pause()/resume() and verify the downloaded
+// file's real content on disk.
 @ExtendWith(TestSetupExtension.class)
 class CefDownloadItemTest {
     private static final String DOWNLOAD_URL = "http://test.com/download.bin";
     private static final String DOWNLOAD_CONTENT = "some download bytes";
 
     @Test
-    void onBeforeDownloadFiresWithRealDownloadItem() {
-        CefDownloadItem[] item = {null};
+    void downloadCompletesAndWritesRealFile() throws Exception {
+        boolean[] gotBeforeDownload = {false};
+        boolean[] wasValid = {false};
+        String[] url = {null};
         String[] suggestedName = {null};
-        boolean[] gotCallback = {false};
+        boolean[] triedPauseResume = {false};
+        boolean[] gotComplete = {false};
+        String[] finalFullPath = {null};
+        long[] finalReceivedBytes = {-1};
+
+        File targetFile = File.createTempFile("jcef-download-test-", ".bin");
+        targetFile.delete();
+        targetFile.deleteOnExit();
 
         TestFrame frame = new TestFrame() {
             @Override
@@ -74,17 +79,56 @@ class CefDownloadItemTest {
                     public boolean onBeforeDownload(CefBrowser browser,
                             CefDownloadItem downloadItem, String suggestedName_,
                             CefBeforeDownloadCallback callback) {
-                        if (gotCallback[0]) return true;
-                        gotCallback[0] = true;
-                        item[0] = downloadItem;
+                        if (gotBeforeDownload[0]) return true;
+                        gotBeforeDownload[0] = true;
+
+                        wasValid[0] = downloadItem.isValid();
+                        if (wasValid[0]) {
+                            url[0] = downloadItem.getURL();
+                            // Sweep the rest of CefDownloadItem's getters --
+                            // just to exercise them, not asserting specific
+                            // values for most (early-in-download state is
+                            // inherently timing-dependent).
+                            downloadItem.isInProgress();
+                            downloadItem.isComplete();
+                            downloadItem.isCanceled();
+                            downloadItem.getCurrentSpeed();
+                            downloadItem.getPercentComplete();
+                            downloadItem.getTotalBytes();
+                            downloadItem.getReceivedBytes();
+                            downloadItem.getStartTime();
+                            downloadItem.getEndTime();
+                            downloadItem.getFullPath();
+                            downloadItem.getId();
+                            downloadItem.getSuggestedFileName();
+                            downloadItem.getContentDisposition();
+                            downloadItem.getMimeType();
+                        }
                         suggestedName[0] = suggestedName_;
-                        terminateTest();
+
+                        callback.Continue(targetFile.getAbsolutePath(), false /* showDialog */);
                         return true;
                     }
 
                     @Override
                     public void onDownloadUpdated(CefBrowser browser,
-                            CefDownloadItem downloadItem, CefDownloadItemCallback callback) {}
+                            CefDownloadItem downloadItem, CefDownloadItemCallback callback) {
+                        if (gotComplete[0] || !downloadItem.isValid()) return;
+
+                        if (!downloadItem.isComplete() && !triedPauseResume[0]
+                                && downloadItem.isInProgress()) {
+                            triedPauseResume[0] = true;
+                            callback.pause();
+                            callback.resume();
+                        }
+
+                        if (downloadItem.isComplete()) {
+                            gotComplete[0] = true;
+                            finalFullPath[0] = downloadItem.getFullPath();
+                            finalReceivedBytes[0] = downloadItem.getReceivedBytes();
+                            terminateTest();
+                        }
+                    }
                 });
 
                 createBrowser(DOWNLOAD_URL, true /* useOSR */);
@@ -92,13 +136,16 @@ class CefDownloadItemTest {
             }
         };
 
-        frame.awaitCompletion(30, TimeUnit.SECONDS);
+        frame.awaitCompletion();
 
-        assertTrue(gotCallback[0], "onBeforeDownload was never invoked");
-        assertNotNull(item[0]);
-        assertTrue(item[0].isValid());
-        assertEquals(DOWNLOAD_URL, item[0].getURL());
+        assertTrue(gotBeforeDownload[0], "onBeforeDownload was never invoked");
+        assertTrue(wasValid[0], "CefDownloadItem was not valid inside onBeforeDownload");
+        assertEquals(DOWNLOAD_URL, url[0]);
         assertEquals("test.bin", suggestedName[0]);
-        assertFalse(item[0].isComplete());
+        assertTrue(gotComplete[0], "Download never completed");
+        assertEquals(targetFile.getAbsolutePath(), finalFullPath[0]);
+        assertEquals(DOWNLOAD_CONTENT.length(), finalReceivedBytes[0]);
+        assertTrue(targetFile.exists(), "Downloaded file does not exist on disk: " + targetFile);
+        assertEquals(DOWNLOAD_CONTENT, new String(Files.readAllBytes(targetFile.toPath())));
     }
 }
