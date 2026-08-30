@@ -42,3 +42,25 @@ void DevToolsMessageObserver::OnDevToolsEvent(CefRefPtr<CefBrowser> browser,
       "(Lorg/cef/browser/CefBrowser;Ljava/lang/String;Ljava/lang/String;)V",
       jbrowser.get(), NewJNIString(env, method), NewJNIString(env, strParams));
 }
+
+void DevToolsMessageObserver::OnDevToolsAgentAttached(
+    CefRefPtr<CefBrowser> browser) {
+  ScopedJNIEnv env;
+  if (!env)
+    return;
+
+  ScopedJNIBrowser jbrowser(env, browser);
+  JNI_CALL_VOID_METHOD(env, handle_, "onDevToolsAgentAttached",
+                       "(Lorg/cef/browser/CefBrowser;)V", jbrowser.get());
+}
+
+void DevToolsMessageObserver::OnDevToolsAgentDetached(
+    CefRefPtr<CefBrowser> browser) {
+  ScopedJNIEnv env;
+  if (!env)
+    return;
+
+  ScopedJNIBrowser jbrowser(env, browser);
+  JNI_CALL_VOID_METHOD(env, handle_, "onDevToolsAgentDetached",
+                       "(Lorg/cef/browser/CefBrowser;)V", jbrowser.get());
+}
