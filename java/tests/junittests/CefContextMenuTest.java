@@ -77,6 +77,8 @@ class CefContextMenuTest {
         int[] typeFlags = {-1};
         boolean[] modelClearedOk = {false};
         int[] countAfterClear = {-1};
+        int[] countAfterBuild = {-1};
+        Exception[] callbackError = {null};
 
         TestFrame frame = new TestFrame() {
             @Override
@@ -90,14 +92,97 @@ class CefContextMenuTest {
                         if (gotMenu[0]) return;
                         gotMenu[0] = true;
 
-                        xCoord[0] = params_.getXCoord();
-                        yCoord[0] = params_.getYCoord();
-                        typeFlags[0] = params_.getTypeFlags();
+                        // A try/finally around the whole body: model_.clear()
+                        // (which suppresses the real native popup -- see the
+                        // class-level comment above) must run even if
+                        // something above it throws, and nothing here may
+                        // propagate an exception out of this native callback
+                        // (this suite's established JNI-callback-thread-
+                        // exception-safety rule) -- so every real assertion
+                        // happens afterward on primitives captured here.
+                        try {
+                            xCoord[0] = params_.getXCoord();
+                            yCoord[0] = params_.getYCoord();
+                            typeFlags[0] = params_.getTypeFlags();
+                            params_.getLinkUrl();
+                            params_.getUnfilteredLinkUrl();
+                            params_.getSourceUrl();
+                            params_.hasImageContents();
+                            params_.getPageUrl();
+                            params_.getFrameUrl();
+                            params_.getFrameCharset();
+                            params_.getMediaType();
+                            params_.getMediaStateFlags();
+                            params_.getSelectionText();
+                            params_.getMisspelledWord();
+                            params_.getDictionarySuggestions(new java.util.Vector<>());
+                            params_.isEditable();
+                            params_.isSpellCheckEnabled();
+                            params_.getEditStateFlags();
 
-                        // Suppress the real native popup unconditionally --
-                        // see the class-level comment above.
-                        modelClearedOk[0] = model_.clear();
-                        countAfterClear[0] = model_.getCount();
+                            // Sweep CefMenuModel_N.cpp's mutator/getter
+                            // surface -- previously 0% covered, only
+                            // reachable via this callback.
+                            model_.addItem(1, "item1");
+                            model_.addCheckItem(2, "check1");
+                            model_.addRadioItem(3, "radio1", 1);
+                            model_.addSeparator();
+                            CefMenuModel sub = model_.addSubMenu(4, "sub1");
+                            model_.insertItemAt(0, 5, "inserted");
+                            model_.insertCheckItemAt(0, 6, "insertedCheck");
+                            model_.insertRadioItemAt(0, 7, "insertedRadio", 1);
+                            model_.insertSeparatorAt(0);
+                            model_.insertSubMenuAt(0, 8, "insertedSub");
+                            countAfterBuild[0] = model_.getCount();
+                            int idx = model_.getIndexOf(1);
+                            int safeIdx = idx >= 0 ? idx : 0;
+                            model_.getCommandIdAt(safeIdx);
+                            model_.setCommandIdAt(safeIdx, 1);
+                            model_.getLabel(1);
+                            model_.getLabelAt(0);
+                            model_.setLabel(1, "item1-renamed");
+                            model_.setLabelAt(0, "renamed-at-0");
+                            model_.getType(1);
+                            model_.getTypeAt(0);
+                            model_.getGroupId(3);
+                            model_.getGroupIdAt(0);
+                            model_.setGroupId(3, 2);
+                            model_.setGroupIdAt(0, 2);
+                            if (sub != null) model_.getSubMenu(4);
+                            model_.getSubMenuAt(0);
+                            model_.isVisible(1);
+                            model_.isVisibleAt(0);
+                            model_.setVisible(1, true);
+                            model_.setVisibleAt(0, true);
+                            model_.isEnabled(1);
+                            model_.isEnabledAt(0);
+                            model_.setEnabled(1, true);
+                            model_.setEnabledAt(0, true);
+                            model_.isChecked(2);
+                            model_.isCheckedAt(0);
+                            model_.setChecked(2, true);
+                            model_.setCheckedAt(0, false);
+                            model_.hasAccelerator(1);
+                            model_.hasAcceleratorAt(0);
+                            model_.setAccelerator(1, 65, false, true, false);
+                            model_.setAcceleratorAt(0, 66, false, true, false);
+                            org.cef.misc.IntRef keyCode = new org.cef.misc.IntRef();
+                            org.cef.misc.BoolRef shift = new org.cef.misc.BoolRef();
+                            org.cef.misc.BoolRef ctrl = new org.cef.misc.BoolRef();
+                            org.cef.misc.BoolRef alt = new org.cef.misc.BoolRef();
+                            model_.getAccelerator(1, keyCode, shift, ctrl, alt);
+                            model_.getAcceleratorAt(0, keyCode, shift, ctrl, alt);
+                            model_.removeAccelerator(1);
+                            model_.removeAcceleratorAt(0);
+                            model_.remove(2);
+                            model_.removeAt(0);
+                        } catch (Exception e) {
+                            callbackError[0] = e;
+                        } finally {
+                            // Suppress the real native popup unconditionally.
+                            modelClearedOk[0] = model_.clear();
+                            countAfterClear[0] = model_.getCount();
+                        }
 
                         terminateTest();
                     }
@@ -146,9 +231,16 @@ class CefContextMenuTest {
         frame.awaitCompletion();
 
         assertTrue(gotMenu[0], "onBeforeContextMenu was never invoked");
+        if (callbackError[0] != null) {
+            throw new AssertionError(
+                    "Exception while sweeping CefContextMenuParams/CefMenuModel",
+                    callbackError[0]);
+        }
         assertTrue(xCoord[0] >= 0, "Unexpected xCoord: " + xCoord[0]);
         assertTrue(yCoord[0] >= 0, "Unexpected yCoord: " + yCoord[0]);
         assertTrue(typeFlags[0] >= 0, "Unexpected typeFlags: " + typeFlags[0]);
+        assertTrue(countAfterBuild[0] > 0, "Expected items to have been added: "
+                + countAfterBuild[0]);
         assertTrue(modelClearedOk[0], "CefMenuModel.clear() reported failure");
         assertTrue(countAfterClear[0] == 0, "Model should be empty after clear(): "
                 + countAfterClear[0]);
