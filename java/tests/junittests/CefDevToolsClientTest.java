@@ -35,6 +35,15 @@ import org.junit.jupiter.api.extension.ExtendWith;
 // history/plan/roadmap.md for that one -- not restored here as a separate
 // class since one confirmed unrecoverable-hang reproducer per root cause is
 // enough).
+//
+// Retested 2026-08-29 via a standalone diagnostic (not this file): tried
+// waiting for onLoadingStateChange(isLoading=false) instead of calling
+// getDevToolsClient() from onAfterCreated, AND holding a strong reference
+// to the CefDevToolsClient as a field for the async call's duration
+// (originally only a local variable, invisible to the whenComplete()
+// lambda -- a real bug in its own right, but not the cause of this hang).
+// Still hung past a 45s external timeout, needing SIGKILL. Unlike issues
+// #17/#18/#12-repro-2, no "wrong technique" explanation found so far.
 @Disabled("UNRECOVERABLE HANG, not just a slow/bounded failure -- see "
         + "Thrameos/java-cef#12. Do not run without a hard external timeout "
         + "wrapper (e.g. `timeout -k 5 45`), and do not remove @Disabled as "

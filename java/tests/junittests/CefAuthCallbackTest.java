@@ -46,7 +46,8 @@ import java.util.concurrent.TimeUnit;
 @Disabled("getAuthCredentials never fires for a locally-intercepted 401 "
         + "response -- likely requires a real net::URLLoader round trip this "
         + "suite's resource-interception harness structurally can't reach, "
-        + "same limitation class as upstream issue #384 (Accept-Language)")
+        + "same limitation class as upstream issue #384 (Accept-Language). "
+        + "Retested 2026-08-29, unchanged.")
 @ExtendWith(TestSetupExtension.class)
 class CefAuthCallbackTest {
     private static final String TEST_URL = "http://test.com/auth_callback_test.html";

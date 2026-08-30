@@ -45,7 +45,10 @@ import org.junit.jupiter.api.extension.ExtendWith;
 @Disabled("Known bug: CefPostDataElement.create() (and likely other *_N "
         + "value-object create() methods, e.g. CefPrintSettings per issue #9) "
         + "crashes if it's the first native CEF object created in the "
-        + "process -- see Thrameos/java-cef#16")
+        + "process -- see Thrameos/java-cef#16 (retested 2026-08-29, still "
+        + "reproduces unchanged after this session's _sync locking fixes -- "
+        + "confirmed unrelated bug class, a CEF ctocpp version-negotiation "
+        + "issue, not a concurrency race)")
 @ExtendWith(TestSetupExtension.class)
 class CefPostDataElementFirstNativeObjectTest {
     @Test
