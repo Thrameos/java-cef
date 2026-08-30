@@ -242,6 +242,22 @@ if(OS_LINUX)
   set_target_properties(${JCEF_HELPER_TARGET} PROPERTIES INSTALL_RPATH "$ORIGIN")
   set_target_properties(${JCEF_HELPER_TARGET} PROPERTIES BUILD_WITH_INSTALL_RPATH TRUE)
 
+  # Standalone diagnostic, not part of the JCEF product -- lives under
+  # tools_native/ (not native/) so it's never mistaken for shipped source;
+  # see tools_native/leak_probe/leak_probe.cc's own comment and
+  # plan/LeakCheckerPort.md's 2026-08-30 status. The two-argument form
+  # points at an out-of-tree source directory while still nesting its
+  # build output under this directory's own binary dir, inheriting
+  # CEF_TARGET_OUT_DIR/libcef_lib/libcef_dll_wrapper from this scope.
+  add_subdirectory(${CMAKE_SOURCE_DIR}/tools_native/leak_probe
+                    ${CMAKE_CURRENT_BINARY_DIR}/leak_probe)
+
+  # Same reasoning as leak_probe above -- see
+  # tools_native/jni_noop_probe/JniNoOpProbe.cpp's own comment. Its own
+  # separate .so, never linked into libjcef.so.
+  add_subdirectory(${CMAKE_SOURCE_DIR}/tools_native/jni_noop_probe
+                    ${CMAKE_CURRENT_BINARY_DIR}/jni_noop_probe)
+
   # JCEF library target.
   add_library(${JCEF_TARGET} SHARED ${JCEF_SRCS})
   SET_LIBRARY_TARGET_PROPERTIES(${JCEF_TARGET})
