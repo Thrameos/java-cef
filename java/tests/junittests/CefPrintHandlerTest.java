@@ -80,16 +80,40 @@ class CefPrintHandlerTest {
 
     // @Disabled -- IMPORTANT, do not remove without extreme caution: this
     // test causes a genuine UNRECOVERABLE hang, confirmed via an isolated run
-    // wrapped in a hard external `timeout -k 5 45` (SIGTERM then SIGKILL) --
-    // even SIGKILL fallback was needed. TestFrame's own 30s watchdog never
-    // got a chance to run. Even with onPrintDialog returning false ("cancel
-    // the printing immediately" per its own Javadoc), browser.print() itself
-    // never returns. Likely CEF's print pipeline blocks at the native level
-    // without a real printer backend in this headless environment -- same
-    // class of risk as CefRunFileDialogCallback (see plan/windows-todo.md).
-    // Filed as Thrameos/java-cef#12 (also covers the analogous DevTools hang,
-    // see CefDevToolsClientTest.java).
-    @Disabled("UNRECOVERABLE HANG, not just a slow/bounded failure -- see "
+    // wrapped in a hard external `timeout -k 5 45` (SIGTERM then SIGKILL).
+    // Filed as Thrameos/java-cef#12 (also covers the analogous DevTools
+    // hang, see plan/roadmap.md).
+    //
+    // ROOT-CAUSE ATTEMPT (this session): the original v1 of this test called
+    // terminateTest() (which begins browser/window teardown) *from inside*
+    // onPrintDialog(), before returning. Per CEF's own source
+    // (~/devel/cef/libcef/browser/printing/print_dialog_linux.cc's
+    // ShowDialog(): "if (!handler_->OnPrintDialog(...)) { callback_impl->
+    // Disconnect(); OnPrintCancel(); }"), the native print pipeline expects
+    // to synchronously continue its own cleanup *after* this Java call
+    // returns false -- tearing down the browser while still inside that
+    // call stack looked like a plausible re-entrancy hazard, matching the
+    // "wrong technique, not a real bug" pattern found for issues #17/#18.
+    //
+    // Tried deferring terminateTest() to onPrintReset() instead (called
+    // from CefPrintDialogLinux's own destructor, after the print pipeline
+    // has unwound). Result: genuinely **intermittent**, not a clean fix --
+    // one isolated run recovered cleanly via the normal 30s watchdog (exit
+    // 134, no SIGKILL needed); the very next isolated run of the identical
+    // test needed a hard SIGKILL past a 45s external timeout with zero
+    // diagnostic output (added System.out.println to each callback --
+    // *none* fired that time, meaning it hangs somewhere before even
+    // onPrintStart in some runs). So the re-entrancy fix is a real
+    // improvement (it eliminates one guaranteed-hang code path) but does
+    // NOT reliably fix the underlying issue -- there's a second,
+    // independent, timing-dependent hang further upstream in CEF's own
+    // print pipeline (a real CUPS daemon is running in this environment,
+    // confirmed via `systemctl status cups`, but with zero printers
+    // configured -- a plausible but unconfirmed trigger). Kept the
+    // onPrintReset()-based fix since it's strictly safer than the
+    // original, but @Disabled stays on until the remaining intermittent
+    // hang is understood.
+    @Disabled("Genuinely intermittent UNRECOVERABLE hang -- see "
             + "Thrameos/java-cef#12. Do not run without a hard external "
             + "timeout wrapper (e.g. `timeout -k 5 45`), and do not remove "
             + "@Disabled as part of a normal suite run.")
@@ -98,6 +122,7 @@ class CefPrintHandlerTest {
         boolean[] gotPrintStart = {false};
         boolean[] gotPrintSettings = {false};
         boolean[] gotPrintDialog = {false};
+        boolean[] gotPrintReset = {false};
 
         TestFrame frame = new TestFrame() {
             @Override
@@ -118,9 +143,17 @@ class CefPrintHandlerTest {
                     public boolean onPrintDialog(CefBrowser browser, boolean hasSelection,
                             org.cef.callback.CefPrintDialogCallback callback) {
                         gotPrintDialog[0] = true;
-                        terminateTest();
-                        // Cancel immediately -- no real dialog is shown.
+                        // Cancel immediately -- no real dialog is shown. Do
+                        // NOT tear the browser down from inside this call;
+                        // see onPrintReset() below.
                         return false;
+                    }
+
+                    @Override
+                    public void onPrintReset(CefBrowser browser) {
+                        if (gotPrintReset[0]) return;
+                        gotPrintReset[0] = true;
+                        terminateTest();
                     }
                 });
 
@@ -141,5 +174,6 @@ class CefPrintHandlerTest {
         assertTrue(gotPrintStart[0], "onPrintStart was never invoked");
         assertTrue(gotPrintSettings[0], "onPrintSettings was never invoked");
         assertTrue(gotPrintDialog[0], "onPrintDialog was never invoked");
+        assertTrue(gotPrintReset[0], "onPrintReset was never invoked");
     }
 }
