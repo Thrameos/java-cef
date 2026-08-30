@@ -20,7 +20,6 @@ import org.cef.misc.StringRef;
 import org.cef.network.CefRequest;
 import org.cef.network.CefResponse;
 import org.cef.network.CefURLRequest;
-import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 
@@ -145,13 +144,6 @@ class CefURLRequestTest {
         }
     }
 
-    // @Tag, not @Disabled: this passes cleanly in the Release build (no
-    // DCHECKs compiled in), confirmed via repeated full-suite runs -- only
-    // the Debug/ENABLE_COVERAGE build crashes (see Thrameos/java-cef#24).
-    // Excluded from Track B's coverage-measurement runs via
-    // --exclude-tag debug-build-crash (see plan/roadmap.md) rather than
-    // @Disabled, which would incorrectly skip it in Release CI too.
-    @Tag("debug-build-crash")
     @Test
     void realCompletionFiresRequestCompleteAndDownloadData() throws InterruptedException {
         CountDownLatch latch = new CountDownLatch(1);
