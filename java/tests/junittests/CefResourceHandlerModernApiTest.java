@@ -280,4 +280,127 @@ class CefResourceHandlerModernApiTest {
         assertTrue(finalTitle[0].equals("async-done:" + ASYNC_CONTENT), "Unexpected result: "
                 + finalTitle[0]);
     }
+
+    private static final String SKIP_PAGE_URL =
+            "http://test.com/modern_resource_api_skip_page.html";
+    private static final String SKIP_RESOURCE_URL =
+            "http://test.com/modern_resource_api_skip.bin";
+    private static final String SKIP_CONTENT = "0123456789ABCDEF";
+    private static final String SKIP_PAGE_CONTENT = "<html><body><script>"
+            + "fetch('" + SKIP_RESOURCE_URL + "', {headers: {'Range': 'bytes=10-'}})"
+            + " .then(r => r.text())"
+            + " .then(text => { document.title = 'skip-done:' + text; });"
+            + "</script></body></html>";
+
+    // Unlike ModernResourceHandler's skip() above (which always reports the
+    // full skip synchronously and never touches the callback object), this
+    // handler defers via bytesSkipped=0/return true and later calls
+    // callback.Continue() from a background thread -- the only way to
+    // actually exercise CefResourceSkipCallback's own Continue() JNI method
+    // (native/CefResourceSkipCallback_N.cpp), which the synchronous skip()
+    // path never reaches.
+    private static class AsyncSkipResourceHandler implements CefResourceHandler {
+        private int offset_ = 0;
+
+        @Override
+        public boolean processRequest(CefRequest request, CefCallback callback) {
+            return false;
+        }
+
+        @Override
+        public boolean open(CefRequest request, BoolRef handleRequest, CefCallback callback) {
+            handleRequest.set(true);
+            return true;
+        }
+
+        @Override
+        public void getResponseHeaders(
+                CefResponse response, IntRef responseLength, StringRef redirectUrl) {
+            responseLength.set(SKIP_CONTENT.length() - offset_);
+            response.setMimeType("text/plain");
+            response.setStatus(206);
+        }
+
+        @Override
+        public boolean readResponse(
+                byte[] dataOut, int bytesToRead, IntRef bytesRead, CefCallback callback) {
+            return false;
+        }
+
+        @Override
+        public boolean read(byte[] dataOut, int bytesToRead, IntRef bytesRead,
+                CefResourceReadCallback callback) {
+            byte[] remaining = SKIP_CONTENT.substring(offset_ + readPos_).getBytes();
+            if (remaining.length == 0) return false;
+            int n = Math.min(remaining.length, bytesToRead);
+            System.arraycopy(remaining, 0, dataOut, 0, n);
+            readPos_ += n;
+            bytesRead.set(n);
+            return true;
+        }
+
+        private int readPos_ = 0;
+
+        @Override
+        public boolean skip(
+                long bytesToSkip, LongRef bytesSkipped, CefResourceSkipCallback callback) {
+            bytesSkipped.set(0);
+            new Thread(() -> {
+                try {
+                    Thread.sleep(50);
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                }
+                int actualSkip = (int) Math.min(bytesToSkip, SKIP_CONTENT.length() - offset_);
+                offset_ += actualSkip;
+                callback.Continue(actualSkip);
+            }).start();
+            return true;
+        }
+
+        @Override
+        public void cancel() {}
+    }
+
+    @Test
+    void skipCanCompleteAsynchronouslyViaTheCallbackObject() {
+        boolean[] gotTitle = {false};
+        String[] finalTitle = {null};
+
+        TestFrame frame = new TestFrame() {
+            @Override
+            protected void setupTest() {
+                addResource(SKIP_PAGE_URL, SKIP_PAGE_CONTENT, "text/html");
+
+                client_.addDisplayHandler(new CefDisplayHandlerAdapter() {
+                    @Override
+                    public void onTitleChange(CefBrowser browser, String title) {
+                        if (gotTitle[0] || !title.startsWith("skip-done:")) return;
+                        gotTitle[0] = true;
+                        finalTitle[0] = title;
+                        terminateTest();
+                    }
+                });
+
+                createBrowser(SKIP_PAGE_URL, true /* useOSR */);
+                super.setupTest();
+            }
+
+            @Override
+            public CefResourceHandler getResourceHandler(
+                    CefBrowser browser, CefFrame frame, CefRequest request) {
+                if (SKIP_RESOURCE_URL.equals(request.getURL())) {
+                    return new AsyncSkipResourceHandler();
+                }
+                return super.getResourceHandler(browser, frame, request);
+            }
+        };
+
+        frame.awaitCompletion();
+
+        assertTrue(gotTitle[0], "The page's ranged fetch() for the asynchronously-skipped "
+                + "resource never completed");
+        assertTrue(finalTitle[0].equals("skip-done:" + SKIP_CONTENT.substring(10)),
+                "Unexpected result: " + finalTitle[0]);
+    }
 }
