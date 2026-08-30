@@ -33,6 +33,15 @@ public abstract class CefCookieManager {
     }
 
     /**
+     * Used internally by {@link org.cef.CefApp}'s shutdown sequence to release the single
+     * persistent native reference cached by {@link #getGlobalManager()} before native CEF
+     * shutdown runs. Not intended for application use.
+     */
+    public static final void disposeGlobalManager() {
+        CefCookieManager_N.disposeGlobalManagerNative();
+    }
+
+    /**
      * Removes the native reference from an unused object.
      */
     public abstract void dispose();

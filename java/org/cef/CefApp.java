@@ -4,9 +4,11 @@
 
 package org.cef;
 
+import org.cef.browser.CefRequestContext;
 import org.cef.callback.CefSchemeHandlerFactory;
 import org.cef.handler.CefAppHandler;
 import org.cef.handler.CefAppHandlerAdapter;
+import org.cef.network.CefCookieManager;
 
 import java.awt.event.ActionEvent;
 import java.awt.event.ActionListener;
@@ -474,6 +476,14 @@ public class CefApp extends CefAppHandlerAdapter {
             @Override
             public void run() {
                 System.out.println("shutdown on " + Thread.currentThread());
+
+                // Release the persistent native reference to the global request
+                // context before shutting down CEF -- otherwise it remains
+                // registered in CEF's internal browser-context tracking past
+                // CefShutdown(), tripping a DCHECK during final process teardown.
+                // See Thrameos/java-cef#23.
+                CefRequestContext.disposeGlobalContext();
+                CefCookieManager.disposeGlobalManager();
 
                 // Shutdown native CEF.
                 N_Shutdown();
