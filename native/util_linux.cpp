@@ -8,13 +8,54 @@
 #undef Success
 
 #include "include/base/cef_callback.h"
+#include "include/cef_task.h"
+#include "include/wrapper/cef_closure_task.h"
 
+#include "client_handler.h"
 #include "jni_util.h"
 #include "temp_window.h"
 
 namespace util {
 
 namespace {
+
+// Windowed (X11) browsers on Linux can hang indefinitely on close: CEF's own
+// close teardown for a windowed browser depends on a synthetic X11 event (a
+// WM_DELETE_WINDOW ClientMessage CEF sends to its own window) that has been
+// confirmed -- via gdb and strace, re-sending the identical message through
+// a separate, definitely-working X11 connection included -- to never be
+// processed under this embedding, regardless of how it is delivered. See
+// plan/roadmap.md's windowed-close investigation for the full trace.
+//
+// Rather than leave the browser (and, transitively, the whole app's
+// eventual CefApp/CefShutdown()) hung forever waiting for a native callback
+// that isn't coming, if CEF's own real LifeSpanHandler::OnBeforeClose()
+// hasn't arrived within this delay, simulate it -- calling the exact same
+// public CefLifeSpanHandler::OnBeforeClose() entry point CEF itself would
+// have called, satisfying the same downstream JNI contract Java code
+// expects, just triggered by JCEF instead of by CEF's own (stuck) event
+// source. The underlying native browser object is left alone; if CEF's
+// real close ever does complete later, LifeSpanHandler::OnBeforeClose()'s
+// own idempotency guard (g_closed_browser_ids) makes that late, genuine call
+// a no-op instead of double-invoking user handlers or double-disposing
+// resources.
+const int64_t kWindowedCloseFallbackDelayMs = 2000;
+
+void FakeOnBeforeCloseIfNeeded(CefRefPtr<CefBrowser> browser) {
+  if (!browser || !browser->GetHost()) {
+    return;
+  }
+  CefRefPtr<ClientHandler> client =
+      (ClientHandler*)browser->GetHost()->GetClient().get();
+  if (!client) {
+    return;
+  }
+  CefRefPtr<CefLifeSpanHandler> handler = client->GetLifeSpanHandler();
+  if (!handler) {
+    return;
+  }
+  handler->OnBeforeClose(browser);
+}
 
 void X_XMoveResizeWindow(unsigned long browserHandle,
                          int x,
@@ -51,6 +92,9 @@ void AddCefBrowser(CefRefPtr<CefBrowser> browser) {
 // This function is called by LifeSpanHandler::DoClose().
 void DestroyCefBrowser(CefRefPtr<CefBrowser> browser) {
   browser->GetHost()->CloseBrowser(true);
+  CefPostDelayedTask(TID_UI,
+                     base::BindOnce(&FakeOnBeforeCloseIfNeeded, browser),
+                     kWindowedCloseFallbackDelayMs);
 }
 
 CefWindowHandle GetWindowHandle(JNIEnv* env, jobject canvas) {
