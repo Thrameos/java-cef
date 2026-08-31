@@ -3,6 +3,7 @@
 // can be found in the LICENSE file.
 
 #include "client_handler.h"
+#include "jcef_trace.h"
 
 #include <stdio.h>
 #include <algorithm>
@@ -62,6 +63,7 @@ ClientHandler::ClientHandler(JNIEnv* env, jobject handler)
 
 template <class T>
 CefRefPtr<T> ClientHandler::GetHandler(const char* class_name) {
+  JCEF_TRACE("ClientHandler::GetHandler() ENTER");
   std::string methodName, className, methodSig;
 
   std::stringstream ss;
@@ -94,54 +96,67 @@ CefRefPtr<T> ClientHandler::GetHandler(const char* class_name) {
 }
 
 CefRefPtr<CefContextMenuHandler> ClientHandler::GetContextMenuHandler() {
+  JCEF_TRACE("ClientHandler::GetContextMenuHandler() ENTER");
   return GetHandler<ContextMenuHandler>("ContextMenuHandler");
 }
 
 CefRefPtr<CefDialogHandler> ClientHandler::GetDialogHandler() {
+  JCEF_TRACE("ClientHandler::GetDialogHandler() ENTER");
   return GetHandler<DialogHandler>("DialogHandler");
 }
 
 CefRefPtr<CefDisplayHandler> ClientHandler::GetDisplayHandler() {
+  JCEF_TRACE("ClientHandler::GetDisplayHandler() ENTER");
   return GetHandler<DisplayHandler>("DisplayHandler");
 }
 
 CefRefPtr<CefDownloadHandler> ClientHandler::GetDownloadHandler() {
+  JCEF_TRACE("ClientHandler::GetDownloadHandler() ENTER");
   return GetHandler<DownloadHandler>("DownloadHandler");
 }
 
 CefRefPtr<CefDragHandler> ClientHandler::GetDragHandler() {
+  JCEF_TRACE("ClientHandler::GetDragHandler() ENTER");
   return GetHandler<DragHandler>("DragHandler");
 }
 
 CefRefPtr<CefFocusHandler> ClientHandler::GetFocusHandler() {
+  JCEF_TRACE("ClientHandler::GetFocusHandler() ENTER");
   return GetHandler<FocusHandler>("FocusHandler");
 }
 
 CefRefPtr<CefJSDialogHandler> ClientHandler::GetJSDialogHandler() {
+  JCEF_TRACE("ClientHandler::GetJSDialogHandler() ENTER");
   return GetHandler<JSDialogHandler>("JSDialogHandler");
 }
 
 CefRefPtr<CefKeyboardHandler> ClientHandler::GetKeyboardHandler() {
+  JCEF_TRACE("ClientHandler::GetKeyboardHandler() ENTER");
   return GetHandler<KeyboardHandler>("KeyboardHandler");
 }
 
 CefRefPtr<CefLifeSpanHandler> ClientHandler::GetLifeSpanHandler() {
+  JCEF_TRACE("ClientHandler::GetLifeSpanHandler() ENTER");
   return GetHandler<LifeSpanHandler>("LifeSpanHandler");
 }
 
 CefRefPtr<CefLoadHandler> ClientHandler::GetLoadHandler() {
+  JCEF_TRACE("ClientHandler::GetLoadHandler() ENTER");
   return GetHandler<LoadHandler>("LoadHandler");
 }
 
 CefRefPtr<CefPrintHandler> ClientHandler::GetPrintHandler() {
+  JCEF_TRACE("ClientHandler::GetPrintHandler() ENTER");
   return GetHandler<PrintHandler>("PrintHandler");
 }
 
 CefRefPtr<CefRenderHandler> ClientHandler::GetRenderHandler() {
+  JCEF_TRACE("ClientHandler::GetRenderHandler() ENTER");
   return GetHandler<RenderHandler>("RenderHandler");
 }
 
 CefRefPtr<CefRequestHandler> ClientHandler::GetRequestHandler() {
+  JCEF_TRACE("ClientHandler::GetRequestHandler() ENTER");
   return GetHandler<RequestHandler>("RequestHandler");
 }
 
@@ -150,6 +165,7 @@ bool ClientHandler::OnProcessMessageReceived(
     CefRefPtr<CefFrame> frame,
     CefProcessId source_process,
     CefRefPtr<CefProcessMessage> message) {
+  JCEF_TRACE("ClientHandler::OnProcessMessageReceived() ENTER");
   bool handled = false;
 
   // Iterate on a copy of |message_routers_| to avoid re-entrancy of
@@ -171,10 +187,12 @@ bool ClientHandler::OnProcessMessageReceived(
 }
 
 CefRefPtr<WindowHandler> ClientHandler::GetWindowHandler() {
+  JCEF_TRACE("ClientHandler::GetWindowHandler() ENTER");
   return GetHandler<WindowHandler>("WindowHandler");
 }
 
 void ClientHandler::AddMessageRouter(JNIEnv* env, jobject jmessageRouter) {
+  JCEF_TRACE("ClientHandler::AddMessageRouter() ENTER");
   CefRefPtr<CefMessageRouter> router = GetMessageRouter(env, jmessageRouter);
   if (!router)
     return;
@@ -208,6 +226,7 @@ void ClientHandler::AddMessageRouter(JNIEnv* env, jobject jmessageRouter) {
 }
 
 void ClientHandler::RemoveMessageRouter(JNIEnv* env, jobject jmessageRouter) {
+  JCEF_TRACE("ClientHandler::RemoveMessageRouter() ENTER");
   CefRefPtr<CefMessageRouter> router = GetMessageRouter(env, jmessageRouter);
   if (!router)
     return;
@@ -240,9 +259,12 @@ void ClientHandler::RemoveMessageRouter(JNIEnv* env, jobject jmessageRouter) {
   }
 }
 
-void ClientHandler::OnAfterCreated() {}
+void ClientHandler::OnAfterCreated() {
+  JCEF_TRACE("ClientHandler::OnAfterCreated() ENTER");
+}
 
 void ClientHandler::OnBeforeClose(CefRefPtr<CefBrowser> browser) {
+  JCEF_TRACE("ClientHandler::OnBeforeClose() ENTER");
   REQUIRE_UI_THREAD();
 
   base::AutoLock lock_scope(message_router_lock_);
@@ -253,6 +275,7 @@ void ClientHandler::OnBeforeClose(CefRefPtr<CefBrowser> browser) {
 
 void ClientHandler::OnBeforeBrowse(CefRefPtr<CefBrowser> browser,
                                    CefRefPtr<CefFrame> frame) {
+  JCEF_TRACE("ClientHandler::OnBeforeBrowse() ENTER");
   REQUIRE_UI_THREAD();
 
   base::AutoLock lock_scope(message_router_lock_);
@@ -262,6 +285,7 @@ void ClientHandler::OnBeforeBrowse(CefRefPtr<CefBrowser> browser,
 }
 
 void ClientHandler::OnRenderProcessTerminated(CefRefPtr<CefBrowser> browser) {
+  JCEF_TRACE("ClientHandler::OnRenderProcessTerminated() ENTER");
   REQUIRE_UI_THREAD();
 
   base::AutoLock lock_scope(message_router_lock_);
@@ -271,6 +295,7 @@ void ClientHandler::OnRenderProcessTerminated(CefRefPtr<CefBrowser> browser) {
 }
 
 jobject ClientHandler::getBrowser(JNIEnv* env, CefRefPtr<CefBrowser> browser) {
+  JCEF_TRACE("ClientHandler::getBrowser() ENTER");
   jobject jbrowser = nullptr;
   JNI_CALL_METHOD(env, handle_, "getBrowser", "(I)Lorg/cef/browser/CefBrowser;",
                   Object, jbrowser, browser->GetIdentifier());
@@ -278,6 +303,7 @@ jobject ClientHandler::getBrowser(JNIEnv* env, CefRefPtr<CefBrowser> browser) {
 }
 
 ClientHandler::BrowserSet ClientHandler::GetAllBrowsers(JNIEnv* env) {
+  JCEF_TRACE("ClientHandler::GetAllBrowsers() ENTER");
   BrowserSet result;
 
   jobject jbrowsers = nullptr;

@@ -3,6 +3,7 @@
 // can be found in the LICENSE file.
 
 #include "window_handler.h"
+#include "jcef_trace.h"
 
 #include "jni_util.h"
 
@@ -10,6 +11,7 @@ WindowHandler::WindowHandler(JNIEnv* env, jobject handler)
     : handle_(env, handler) {}
 
 bool WindowHandler::GetRect(CefRefPtr<CefBrowser> browser, CefRect& rect) {
+  JCEF_TRACE("WindowHandler::GetRect() ENTER");
   ScopedJNIEnv env;
   if (!env)
     return false;
@@ -19,6 +21,7 @@ bool WindowHandler::GetRect(CefRefPtr<CefBrowser> browser, CefRect& rect) {
 }
 
 bool WindowHandler::GetRect(jobject browser, CefRect& rect) {
+  JCEF_TRACE("WindowHandler::GetRect() ENTER");
   ScopedJNIEnv env;
   if (!env)
     return false;
@@ -40,6 +43,7 @@ void WindowHandler::OnMouseEvent(CefRefPtr<CefBrowser> browser,
                                  int absY,
                                  int modifier,
                                  int button) {
+  JCEF_TRACE("WindowHandler::OnMouseEvent() ENTER");
   ScopedJNIEnv env;
   if (!env)
     return;

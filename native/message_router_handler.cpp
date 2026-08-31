@@ -3,6 +3,7 @@
 // can be found in the LICENSE file.
 
 #include "message_router_handler.h"
+#include "jcef_trace.h"
 
 #include "jni_util.h"
 
@@ -32,6 +33,7 @@ bool MessageRouterHandler::OnQuery(
     const CefString& request,
     bool persistent,
     CefRefPtr<CefMessageRouterBrowserSide::Callback> callback) {
+  JCEF_TRACE("MessageRouterHandler::OnQuery() ENTER");
   ScopedJNIEnv env;
   if (!env)
     return false;
@@ -46,7 +48,7 @@ bool MessageRouterHandler::OnQuery(
   // knows not to release its native reference after the first call. See
   // Thrameos/java-cef#13.
   JNI_CALL_VOID_METHOD(env, jcallback.get(), "setPersistent", "(Z)V",
-                        persistent ? JNI_TRUE : JNI_FALSE);
+                       persistent ? JNI_TRUE : JNI_FALSE);
 
   jboolean jresult = JNI_FALSE;
 
@@ -70,6 +72,7 @@ bool MessageRouterHandler::OnQuery(
 void MessageRouterHandler::OnQueryCanceled(CefRefPtr<CefBrowser> browser,
                                            CefRefPtr<CefFrame> frame,
                                            int64_t query_id) {
+  JCEF_TRACE("MessageRouterHandler::OnQueryCanceled() ENTER");
   ScopedJNIEnv env;
   if (!env)
     return;

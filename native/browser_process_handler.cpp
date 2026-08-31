@@ -3,6 +3,7 @@
 // can be found in the LICENSE file.
 
 #include "browser_process_handler.h"
+#include "jcef_trace.h"
 
 #include "client_handler.h"
 #include "context.h"
@@ -26,6 +27,7 @@ BrowserProcessHandler::~BrowserProcessHandler() {
 }
 
 void BrowserProcessHandler::OnContextInitialized() {
+  JCEF_TRACE("BrowserProcessHandler::OnContextInitialized() ENTER");
   Context::GetInstance()->OnContextInitialized();
 
   if (!handle_)
@@ -39,6 +41,7 @@ void BrowserProcessHandler::OnContextInitialized() {
 }
 
 void BrowserProcessHandler::OnScheduleMessagePumpWork(int64_t delay_ms) {
+  JCEF_TRACE("BrowserProcessHandler::OnScheduleMessagePumpWork() ENTER");
   if (!handle_)
     return;
 
@@ -53,6 +56,7 @@ void BrowserProcessHandler::OnScheduleMessagePumpWork(int64_t delay_ms) {
 bool BrowserProcessHandler::OnAlreadyRunningAppRelaunch(
     CefRefPtr<CefCommandLine> command_line,
     const CefString& current_directory) {
+  JCEF_TRACE("BrowserProcessHandler::OnAlreadyRunningAppRelaunch() ENTER");
   if (!handle_)
     return false;
 
@@ -77,6 +81,7 @@ bool BrowserProcessHandler::OnAlreadyRunningAppRelaunch(
 
 // static
 CefRefPtr<CefListValue> BrowserProcessHandler::GetMessageRouterConfigs() {
+  JCEF_TRACE("BrowserProcessHandler::GetMessageRouterConfigs() ENTER");
   int idx = 0;
   static std::set<CefMessageRouterConfig, cmpCfg>::iterator iter;
 
@@ -100,6 +105,7 @@ CefRefPtr<CefListValue> BrowserProcessHandler::GetMessageRouterConfigs() {
 // static
 void BrowserProcessHandler::AddMessageRouterConfig(
     const CefMessageRouterConfig& cfg) {
+  JCEF_TRACE("BrowserProcessHandler::AddMessageRouterConfig() ENTER");
   base::AutoLock lock_scope(router_cfg_lock_);
   router_cfg_.insert(cfg);
 }
@@ -107,6 +113,7 @@ void BrowserProcessHandler::AddMessageRouterConfig(
 // static
 void BrowserProcessHandler::RemoveMessageRouterConfig(
     const CefMessageRouterConfig& cfg) {
+  JCEF_TRACE("BrowserProcessHandler::RemoveMessageRouterConfig() ENTER");
   base::AutoLock lock_scope(router_cfg_lock_);
   router_cfg_.erase(cfg);
 }

@@ -9,6 +9,7 @@
 
 #include "include/base/cef_callback.h"
 
+#include "jcef_trace.h"
 #include "jni_util.h"
 #include "temp_window.h"
 
@@ -50,7 +51,15 @@ void AddCefBrowser(CefRefPtr<CefBrowser> browser) {
 
 // This function is called by LifeSpanHandler::DoClose().
 void DestroyCefBrowser(CefRefPtr<CefBrowser> browser) {
+  JCEF_TRACE(
+      "util::DestroyCefBrowser() ENTER browser_id=%d, calling "
+      "CloseBrowser(true)",
+      browser->GetIdentifier());
   browser->GetHost()->CloseBrowser(true);
+  JCEF_TRACE(
+      "util::DestroyCefBrowser() EXIT browser_id=%d (CloseBrowser(true) "
+      "returned)",
+      browser->GetIdentifier());
 }
 
 CefWindowHandle GetWindowHandle(JNIEnv* env, jobject canvas) {

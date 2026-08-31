@@ -3,6 +3,7 @@
 // can be found in the LICENSE file.
 
 #include "write_handler.h"
+#include "jcef_trace.h"
 
 #include "jni_util.h"
 #include "util.h"
@@ -21,6 +22,7 @@ WriteHandler::~WriteHandler() {
 }
 
 size_t WriteHandler::Write(const void* ptr, size_t size, size_t n) {
+  JCEF_TRACE("WriteHandler::Write() ENTER");
   base::AutoLock lock_scope(lock_);
   size_t rv = n;
 
@@ -43,15 +45,18 @@ size_t WriteHandler::Write(const void* ptr, size_t size, size_t n) {
 }
 
 int WriteHandler::Seek(int64_t offset, int whence) {
+  JCEF_TRACE("WriteHandler::Seek() ENTER");
   // not supported by Javas OutputStream
   return -1;
 }
 
 int64_t WriteHandler::Tell() {
+  JCEF_TRACE("WriteHandler::Tell() ENTER");
   return offset_;
 }
 
 int WriteHandler::Flush() {
+  JCEF_TRACE("WriteHandler::Flush() ENTER");
   ScopedJNIEnv env;
   if (env) {
     JNI_CALL_VOID_METHOD(env, handle_, "flush", "()V");
@@ -60,5 +65,6 @@ int WriteHandler::Flush() {
 }
 
 bool WriteHandler::MayBlock() {
+  JCEF_TRACE("WriteHandler::MayBlock() ENTER");
   return false;
 }

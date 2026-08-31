@@ -3,6 +3,7 @@
 // can be found in the LICENSE file.
 
 #include "drag_handler.h"
+#include "jcef_trace.h"
 
 #include "jni_util.h"
 
@@ -12,6 +13,7 @@ DragHandler::DragHandler(JNIEnv* env, jobject handler)
 bool DragHandler::OnDragEnter(CefRefPtr<CefBrowser> browser,
                               CefRefPtr<CefDragData> dragData,
                               CefDragHandler::DragOperationsMask mask) {
+  JCEF_TRACE("DragHandler::OnDragEnter() ENTER");
   ScopedJNIEnv env;
   if (!env)
     return false;

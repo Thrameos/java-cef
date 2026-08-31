@@ -3,6 +3,7 @@
 // can be found in the LICENSE file.
 
 #include "jsdialog_handler.h"
+#include "jcef_trace.h"
 
 #include "client_handler.h"
 #include "jni_util.h"
@@ -33,6 +34,7 @@ bool JSDialogHandler::OnJSDialog(CefRefPtr<CefBrowser> browser,
                                  const CefString& default_prompt_text,
                                  CefRefPtr<CefJSDialogCallback> callback,
                                  bool& suppress_message) {
+  JCEF_TRACE("JSDialogHandler::OnJSDialog() ENTER");
   ScopedJNIEnv env;
   if (!env)
     return false;
@@ -83,6 +85,7 @@ bool JSDialogHandler::OnBeforeUnloadDialog(
     const CefString& message_text,
     bool is_reload,
     CefRefPtr<CefJSDialogCallback> callback) {
+  JCEF_TRACE("JSDialogHandler::OnBeforeUnloadDialog() ENTER");
   ScopedJNIEnv env;
   if (!env)
     return false;
@@ -109,6 +112,7 @@ bool JSDialogHandler::OnBeforeUnloadDialog(
 }
 
 void JSDialogHandler::OnResetDialogState(CefRefPtr<CefBrowser> browser) {
+  JCEF_TRACE("JSDialogHandler::OnResetDialogState() ENTER");
   ScopedJNIEnv env;
   if (!env)
     return;
@@ -120,6 +124,7 @@ void JSDialogHandler::OnResetDialogState(CefRefPtr<CefBrowser> browser) {
 }
 
 void JSDialogHandler::OnDialogClosed(CefRefPtr<CefBrowser> browser) {
+  JCEF_TRACE("JSDialogHandler::OnDialogClosed() ENTER");
   ScopedJNIEnv env;
   if (!env)
     return;

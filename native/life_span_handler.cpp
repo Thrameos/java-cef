@@ -26,8 +26,16 @@ bool LifeSpanHandler::OnBeforePopup(CefRefPtr<CefBrowser> browser,
                                     CefBrowserSettings& settings,
                                     CefRefPtr<CefDictionaryValue>& extra_info,
                                     bool* no_javascript_access) {
+  JCEF_TRACE("LifeSpanHandler::OnBeforePopup() ENTER browser_id=%d osr=%d",
+             browser->GetIdentifier(),
+             browser->GetHost()->IsWindowRenderingDisabled());
   if (browser->GetHost()->IsWindowRenderingDisabled()) {
-    // Cancel popups in off-screen rendering mode.
+    // Cancel popups in off-screen rendering mode -- see CefLifeSpanPopupTest's
+    // @Disabled note: this is why OnBeforePopup's JNI dispatch below is
+    // unreachable for every OSR browser, unconditionally.
+    JCEF_TRACE(
+        "LifeSpanHandler::OnBeforePopup() EXIT early (OSR cancels "
+        "popups, never reaching Java)");
     return true;
   }
 
@@ -52,6 +60,8 @@ bool LifeSpanHandler::OnBeforePopup(CefRefPtr<CefBrowser> browser,
 }
 
 void LifeSpanHandler::OnAfterCreated(CefRefPtr<CefBrowser> browser) {
+  JCEF_TRACE("LifeSpanHandler::OnAfterCreated() ENTER browser_id=%d",
+             browser->GetIdentifier());
   ScopedJNIEnv env;
   if (!env || jbrowsers_.empty())
     return;
@@ -77,6 +87,8 @@ void LifeSpanHandler::OnAfterCreated(CefRefPtr<CefBrowser> browser) {
 }
 
 bool LifeSpanHandler::DoClose(CefRefPtr<CefBrowser> browser) {
+  JCEF_TRACE("LifeSpanHandler::DoClose() ENTER browser_id=%d",
+             browser->GetIdentifier());
   ScopedJNIEnv env;
   if (!env)
     return false;
@@ -87,6 +99,8 @@ bool LifeSpanHandler::DoClose(CefRefPtr<CefBrowser> browser) {
   JNI_CALL_METHOD(env, handle_, "doClose", "(Lorg/cef/browser/CefBrowser;)Z",
                   Boolean, jreturn, jbrowser.get());
 
+  JCEF_TRACE("LifeSpanHandler::DoClose() EXIT browser_id=%d returning %d",
+             browser->GetIdentifier(), jreturn != JNI_FALSE);
   return (jreturn != JNI_FALSE);
 }
 
@@ -110,13 +124,16 @@ void LifeSpanHandler::OnBeforeClose(CefRefPtr<CefBrowser> browser) {
 
   CefRefPtr<ClientHandler> client =
       (ClientHandler*)browser->GetHost()->GetClient().get();
-  JCEF_TRACE("LifeSpanHandler::OnBeforeClose() calling client->OnBeforeClose()");
+  JCEF_TRACE(
+      "LifeSpanHandler::OnBeforeClose() calling client->OnBeforeClose()");
   client->OnBeforeClose(browser);
   JCEF_TRACE("LifeSpanHandler::OnBeforeClose() EXIT browser_id=%d",
              browser->GetIdentifier());
 }
 
 void LifeSpanHandler::OnAfterParentChanged(CefRefPtr<CefBrowser> browser) {
+  JCEF_TRACE("LifeSpanHandler::OnAfterParentChanged() ENTER browser_id=%d",
+             browser->GetIdentifier());
   REQUIRE_UI_THREAD();
   ScopedJNIEnv env;
   if (!env)

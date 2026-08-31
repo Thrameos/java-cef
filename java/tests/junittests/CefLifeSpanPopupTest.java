@@ -13,36 +13,46 @@ import org.junit.jupiter.api.Disabled;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 
-import java.awt.Component;
-import java.awt.event.InputEvent;
-import java.awt.event.MouseEvent;
-
 // Exercises native/life_span_handler.cpp's LifeSpanHandler::OnBeforePopup
 // (0% covered -- no existing test triggers it), via a real window.open() call.
 //
-// @Disabled: window.open() never reaches OnBeforePopup in this harness --
-// confirmed a genuine hang, not a test bug, via two ruled-out hypotheses:
-// 1. Tried calling window.open() from a bare inline <script> at page load first
-//    -- passed once, then hung waiting for onBeforePopup on a later run.
-//    Consistent with Chromium's popup blocker requiring genuine user
-//    activation (the same class of gate as beforeunload dialogs -- see
-//    plan/roadmap.md's NEXT-UP PLAN).
-// 2. Switched to triggering window.open() from a real synthetic mouse click
-//    (same canvas.dispatchEvent(MOUSE_PRESSED/RELEASED/CLICKED) technique
-//    CefContextMenuTest already uses successfully for its right-click) --
-//    still hangs, every run. Added a diagnostic (document.title='clicked' in
-//    the onclick handler, observed via CefDisplayHandler.onTitleChange): the
-//    click *does* land and the onclick handler *does* run (title change
-//    confirmed in the log) -- so this isn't a click-delivery problem. Yet
-//    OnBeforePopup still never fires. Most likely explanation: Blink's
-//    user-activation tracking isn't satisfied by this OSR synthetic-input
-//    pipeline the way it is for other gestures (e.g. right-click already
-//    reliably triggers OnBeforeContextMenu in CefContextMenuTest) -- not
-//    confirmed further, left as an open native/CEF-behavior question rather
-//    than guessed at.
+// @Disabled: root-caused, and it's not fixable by changing anything about how
+// this test triggers window.open(). Two synthetic-input techniques were tried
+// first (a bare inline <script> at page load, then a real synthetic mouse
+// click matching CefContextMenuTest's technique) and both hung. A diagnostic
+// (document.title changes, observed via CefDisplayHandler.onTitleChange)
+// showed the synthetic click *does* land and *does* run the onclick handler.
+// Suspecting Blink's user-activation tracking wasn't satisfied by synthetic
+// OSR input, CEF's own test-only CefExecuteJavaScriptWithUserGestureForTests()
+// (include/test/cef_test_helpers.h -- see life_span_unittest.cc in
+// ~/devel/cef/tests/ceftests/, which uses exactly this instead of synthetic
+// input) was bound for JCEF (CefTestHelper.java/native/CefTestHelper.cpp) and
+// tried too. Same result: the JS ran to completion (title changed all the way
+// to 'clicked'), yet OnBeforePopup still never fired.
 //
-// Left disabled per the standing "port tests, disable failures with a note,
-// move on" strategy.
+// The real root cause: native/life_span_handler.cpp's OnBeforePopup has
+//     if (browser->GetHost()->IsWindowRenderingDisabled()) {
+//       // Cancel popups in off-screen rendering mode.
+//       return true;
+//     }
+// at the very top, unconditionally returning before ever reaching the
+// JNI_CALL_METHOD that would invoke Java's onBeforePopup(). window.open() DID
+// fire in the renderer (confirmed by the title-change diagnostic completing);
+// CEF's browser-process side simply never surfaces it to JCEF for OSR
+// browsers. This has nothing to do with user gestures -- that whole
+// investigation path was a red herring. Since createBrowser(..., true) (OSR)
+// is what every popup test uses, this JNI dispatch is unreachable code under
+// OSR no matter what triggers the JS. Covering it requires a *windowed*
+// (non-OSR) browser -- but CefBrowserWrTest (added specifically as the first
+// windowed-browser test) found windowed browsers hang on close, so this test
+// is blocked on that same root cause. See plan/roadmap.md's NEXT-UP PLAN item
+// 2 and CefBrowserWrTest's own @Disabled note.
+//
+// CefTestHelper's user-gesture binding is left in place (it's real, working,
+// CEF-verified infrastructure -- confirmed executing JS under a genuine faked
+// gesture) even though it turned out not to be this test's actual blocker; it
+// may still be needed for other user-activation-gated coverage later (e.g.
+// onbeforeunload dialogs).
 @ExtendWith(TestSetupExtension.class)
 class CefLifeSpanPopupTest {
     private static final String TEST_URL = "http://test.com/life_span_popup.html";
@@ -54,10 +64,10 @@ class CefLifeSpanPopupTest {
             + "</body></html>";
 
     @Test
-    @Disabled("window.open() never invokes OnBeforePopup in this harness even from a "
-            + "real synthetic click that demonstrably reaches the onclick handler -- "
-            + "see the class-level comment for the full investigation. Real, "
-            + "reproducible finding, not a test bug.")
+    @Disabled("OnBeforePopup is unreachable for OSR browsers -- native/life_span_handler.cpp "
+            + "unconditionally cancels+returns before the JNI dispatch when "
+            + "IsWindowRenderingDisabled(). Needs a windowed browser, which is itself blocked "
+            + "on CefBrowserWrTest's close hang. See the class-level comment.")
     void clickingOpenerInvokesOnBeforePopupAndIsCancelled() {
         boolean[] fired = {false};
         String[] receivedUrl = {null};
@@ -85,24 +95,8 @@ class CefLifeSpanPopupTest {
             public void onLoadingStateChange(CefBrowser browser, boolean isLoading,
                     boolean canGoBack, boolean canGoForward) {
                 if (isLoading) return;
-                Component canvas = browser.getUIComponent();
-                int x = 30;
-                int y = 20;
-                browser.setFocus(true);
-                // Delay the synthetic click: the OSR GL surface may not be
-                // realized/painted yet immediately after onLoadingStateChange
-                // fires -- same rationale as CefContextMenuTest's click delay.
-                new javax.swing.Timer(500, ev -> {
-                    long now = System.currentTimeMillis();
-                    canvas.dispatchEvent(new MouseEvent(canvas, MouseEvent.MOUSE_PRESSED, now,
-                            InputEvent.BUTTON1_DOWN_MASK, x, y, 1, false, MouseEvent.BUTTON1));
-                    canvas.dispatchEvent(new MouseEvent(canvas, MouseEvent.MOUSE_RELEASED,
-                            now + 1, 0, x, y, 1, false, MouseEvent.BUTTON1));
-                    canvas.dispatchEvent(new MouseEvent(canvas, MouseEvent.MOUSE_CLICKED,
-                            now + 1, 0, x, y, 1, false, MouseEvent.BUTTON1));
-                }) {
-                    { setRepeats(false); }
-                }.start();
+                CefTestHelper.executeJavaScriptWithUserGestureForTests(
+                        browser.getMainFrame(), "document.getElementById('opener').click()");
             }
         };
 

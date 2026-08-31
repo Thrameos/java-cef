@@ -3,6 +3,7 @@
 // can be found in the LICENSE file.
 
 #include "render_handler.h"
+#include "jcef_trace.h"
 
 #include "client_handler.h"
 #include "jni_util.h"
@@ -155,6 +156,7 @@ RenderHandler::RenderHandler(JNIEnv* env, jobject handler)
 
 bool RenderHandler::GetRootScreenRect(CefRefPtr<CefBrowser> browser,
                                       CefRect& rect) {
+  JCEF_TRACE("RenderHandler::GetRootScreenRect() ENTER");
   ScopedJNIEnv env;
   if (!env)
     return false;
@@ -165,6 +167,7 @@ bool RenderHandler::GetRootScreenRect(CefRefPtr<CefBrowser> browser,
 }
 
 void RenderHandler::GetViewRect(CefRefPtr<CefBrowser> browser, CefRect& rect) {
+  JCEF_TRACE("RenderHandler::GetViewRect() ENTER");
   ScopedJNIEnv env;
   if (!env)
     return;
@@ -187,6 +190,7 @@ void RenderHandler::GetViewRect(CefRefPtr<CefBrowser> browser, CefRect& rect) {
 /*--cef()--*/
 bool RenderHandler::GetScreenInfo(CefRefPtr<CefBrowser> browser,
                                   CefScreenInfo& screen_info) {
+  JCEF_TRACE("RenderHandler::GetScreenInfo() ENTER");
   ScopedJNIEnv env;
   if (!env) {
     return false;
@@ -218,6 +222,7 @@ bool RenderHandler::GetScreenPoint(CefRefPtr<CefBrowser> browser,
                                    int viewY,
                                    int& screenX,
                                    int& screenY) {
+  JCEF_TRACE("RenderHandler::GetScreenPoint() ENTER");
   ScopedJNIEnv env;
   if (!env)
     return false;
@@ -227,6 +232,7 @@ bool RenderHandler::GetScreenPoint(CefRefPtr<CefBrowser> browser,
 }
 
 void RenderHandler::OnPopupShow(CefRefPtr<CefBrowser> browser, bool show) {
+  JCEF_TRACE("RenderHandler::OnPopupShow() ENTER");
   ScopedJNIEnv env;
   if (!env)
     return;
@@ -239,6 +245,7 @@ void RenderHandler::OnPopupShow(CefRefPtr<CefBrowser> browser, bool show) {
 
 void RenderHandler::OnPopupSize(CefRefPtr<CefBrowser> browser,
                                 const CefRect& rect) {
+  JCEF_TRACE("RenderHandler::OnPopupSize() ENTER");
   ScopedJNIEnv env;
   if (!env)
     return;
@@ -259,6 +266,7 @@ void RenderHandler::OnPaint(CefRefPtr<CefBrowser> browser,
                             const void* buffer,
                             int width,
                             int height) {
+  JCEF_TRACE("RenderHandler::OnPaint() ENTER");
   ScopedJNIEnv env;
   if (!env)
     return;
@@ -281,6 +289,7 @@ bool RenderHandler::StartDragging(CefRefPtr<CefBrowser> browser,
                                   DragOperationsMask allowed_ops,
                                   int x,
                                   int y) {
+  JCEF_TRACE("RenderHandler::StartDragging() ENTER");
   ScopedJNIEnv env;
   if (!env)
     return false;
@@ -300,6 +309,7 @@ bool RenderHandler::StartDragging(CefRefPtr<CefBrowser> browser,
 
 void RenderHandler::UpdateDragCursor(CefRefPtr<CefBrowser> browser,
                                      DragOperation operation) {
+  JCEF_TRACE("RenderHandler::UpdateDragCursor() ENTER");
   ScopedJNIEnv env;
   if (!env)
     return;
@@ -311,6 +321,7 @@ void RenderHandler::UpdateDragCursor(CefRefPtr<CefBrowser> browser,
 }
 
 bool RenderHandler::GetViewRect(jobject browser, CefRect& rect) {
+  JCEF_TRACE("RenderHandler::GetViewRect() ENTER");
   ScopedJNIEnv env;
   if (!env)
     return false;
@@ -331,6 +342,7 @@ bool RenderHandler::GetScreenPoint(jobject browser,
                                    int viewY,
                                    int& screenX,
                                    int& screenY) {
+  JCEF_TRACE("RenderHandler::GetScreenPoint() ENTER");
   ScopedJNIEnv env;
   if (!env)
     return false;

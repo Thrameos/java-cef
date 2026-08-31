@@ -15,6 +15,7 @@
 #include "critical_wait.h"
 #include "devtools_message_observer.h"
 #include "int_callback.h"
+#include "jcef_trace.h"
 #include "jni_util.h"
 #include "life_span_handler.h"
 #include "pdf_print_callback.h"
@@ -930,8 +931,9 @@ void create(std::shared_ptr<JNIObjectsForCreate> objs,
             jboolean osr,
             jboolean transparent) {
   ScopedJNIEnv env;
-  CefRefPtr<ClientHandler> clientHandler = GetCefFromJNIObject_sync<ClientHandler>(
-      env, objs->jclientHandler, "CefClientHandler");
+  CefRefPtr<ClientHandler> clientHandler =
+      GetCefFromJNIObject_sync<ClientHandler>(env, objs->jclientHandler,
+                                              "CefClientHandler");
   if (!clientHandler.get())
     return;
 
@@ -940,8 +942,8 @@ void create(std::shared_ptr<JNIObjectsForCreate> objs,
   if (!lifeSpanHandler.get())
     return;
 
-  CefRefPtr<CefBrowser> parentBrowser =
-      GetCefFromJNIObject_sync<CefBrowser>(env, objs->jparentBrowser, "CefBrowser");
+  CefRefPtr<CefBrowser> parentBrowser = GetCefFromJNIObject_sync<CefBrowser>(
+      env, objs->jparentBrowser, "CefBrowser");
 
   CefWindowInfo windowInfo;
   CefBrowserSettings settings;
@@ -1015,8 +1017,9 @@ void create(std::shared_ptr<JNIObjectsForCreate> objs,
   CefRefPtr<CefBrowser> browserObj;
   CefString strUrl = GetJNIString(env, static_cast<jstring>(objs->url.get()));
 
-  CefRefPtr<CefRequestContext> context = GetCefFromJNIObject_sync<CefRequestContext>(
-      env, objs->jcontext, "CefRequestContext");
+  CefRefPtr<CefRequestContext> context =
+      GetCefFromJNIObject_sync<CefRequestContext>(env, objs->jcontext,
+                                                  "CefRequestContext");
 
   // Add a global ref that will be released in LifeSpanHandler::OnAfterCreated.
   jobject globalRef = env->NewGlobalRef(objs->jbrowser);
@@ -1495,19 +1498,31 @@ Java_org_cef_browser_CefBrowser_1N_N_1Close(JNIEnv* env,
                                             jobject obj,
                                             jboolean force) {
   CefRefPtr<CefBrowser> browser = JNI_GET_BROWSER_OR_RETURN(env, obj);
+  JCEF_TRACE("CefBrowser_N::N_Close() ENTER browser_id=%d force=%d osr=%d",
+             browser->GetIdentifier(), force != JNI_FALSE,
+             browser->GetHost()->IsWindowRenderingDisabled());
   if (force != JNI_FALSE) {
     if (browser->GetHost()->IsWindowRenderingDisabled()) {
       browser->GetHost()->CloseBrowser(true);
     } else {
       // Destroy the native window representation.
-      if (CefCurrentlyOn(TID_UI))
+      if (CefCurrentlyOn(TID_UI)) {
+        JCEF_TRACE(
+            "CefBrowser_N::N_Close() already on TID_UI, calling "
+            "util::DestroyCefBrowser() synchronously");
         util::DestroyCefBrowser(browser);
-      else
+      } else {
+        JCEF_TRACE(
+            "CefBrowser_N::N_Close() NOT on TID_UI, posting "
+            "util::DestroyCefBrowser() to TID_UI");
         CefPostTask(TID_UI, base::BindOnce(&util::DestroyCefBrowser, browser));
+      }
     }
   } else {
     browser->GetHost()->CloseBrowser(false);
   }
+  JCEF_TRACE("CefBrowser_N::N_Close() EXIT browser_id=%d",
+             browser->GetIdentifier());
 }
 
 JNIEXPORT void JNICALL

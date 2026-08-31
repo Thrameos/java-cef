@@ -3,6 +3,7 @@
 // can be found in the LICENSE file.
 
 #include "dialog_handler.h"
+#include "jcef_trace.h"
 
 #include "client_handler.h"
 #include "jni_util.h"
@@ -36,6 +37,7 @@ bool DialogHandler::OnFileDialog(
     const std::vector<CefString>& accept_extensions,
     const std::vector<CefString>& accept_descriptions,
     CefRefPtr<CefFileDialogCallback> callback) {
+  JCEF_TRACE("DialogHandler::OnFileDialog() ENTER");
   ScopedJNIEnv env;
   if (!env)
     return false;

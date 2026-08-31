@@ -3,6 +3,7 @@
 // can be found in the LICENSE file.
 
 #include "context_menu_handler.h"
+#include "jcef_trace.h"
 
 #include "jni_util.h"
 
@@ -30,6 +31,7 @@ void ContextMenuHandler::OnBeforeContextMenu(
     CefRefPtr<CefFrame> frame,
     CefRefPtr<CefContextMenuParams> params,
     CefRefPtr<CefMenuModel> model) {
+  JCEF_TRACE("ContextMenuHandler::OnBeforeContextMenu() ENTER");
   ScopedJNIEnv env;
   if (!env)
     return;
@@ -56,6 +58,7 @@ bool ContextMenuHandler::OnContextMenuCommand(
     CefRefPtr<CefContextMenuParams> params,
     int command_id,
     EventFlags event_flags) {
+  JCEF_TRACE("ContextMenuHandler::OnContextMenuCommand() ENTER");
   ScopedJNIEnv env;
   if (!env)
     return false;
@@ -79,6 +82,7 @@ bool ContextMenuHandler::OnContextMenuCommand(
 
 void ContextMenuHandler::OnContextMenuDismissed(CefRefPtr<CefBrowser> browser,
                                                 CefRefPtr<CefFrame> frame) {
+  JCEF_TRACE("ContextMenuHandler::OnContextMenuDismissed() ENTER");
   ScopedJNIEnv env;
   if (!env)
     return;
