@@ -13,7 +13,6 @@ import org.cef.browser.CefMessageRouter;
 import org.cef.callback.CefQueryCallback;
 import org.cef.handler.CefDisplayHandlerAdapter;
 import org.cef.handler.CefMessageRouterHandlerAdapter;
-import org.junit.jupiter.api.Disabled;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 
@@ -24,17 +23,12 @@ import java.util.concurrent.TimeUnit;
 // workflow (JS sets persistent:true) is documented to allow
 // CefQueryCallback.success() to be called repeatedly, with each call invoking
 // the JS onSuccess handler again. native/CefQueryCallback_N.cpp's N_Success
-// unconditionally calls ClearSelf() after the first call regardless of
-// |persistent|, so the native reference is torn down and a second success()
-// call silently does nothing.
-//
-// @Disabled until the upstream/fork bug is fixed -- this test currently FAILS
-// (confirmed by running it un-@Disabled), demonstrating the real bug rather
-// than a hypothetical one. Re-enable once CefQueryCallback_N.cpp respects
-// |persistent|.
-@Disabled("Known bug: CefQueryCallback_N.cpp ignores the persistent flag and "
-        + "clears its native ref after the first success() call -- see "
-        + "Thrameos/java-cef#13 (upstream chromiumembedded/java-cef#398)")
+// used to unconditionally call ClearSelf() after the first call regardless
+// of |persistent|, so the native reference was torn down and a second
+// success() call silently did nothing. Fixed by threading |persistent|
+// through to N_Success (set on the Java-side callback object by
+// MessageRouterHandler::OnQuery() before onQuery() is invoked) and only
+// clearing the native ref when the query is not persistent.
 @ExtendWith(TestSetupExtension.class)
 class UpstreamIssue398Test {
     private static final String TEST_URL = "http://test.com/upstream_issue_398.html";
