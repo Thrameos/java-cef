@@ -143,6 +143,12 @@ endif()
 # per docs/code_coverage.md. Requires clang/clang++ (CMAKE_C_COMPILER/CMAKE_CXX_COMPILER)
 # instead of gcc -- gcov's --coverage flags and this are mutually exclusive instrumentation
 # schemes, so this is a separate option, not layered on top of ENABLE_COVERAGE.
+# NOTE: needs clang-18 or newer. clang-14 and clang-15 (checked directly, 2026-08-30) both
+# fail to parse this CEF version's own base/internal/cef_bind_internal.h -- a real C++20
+# parser limitation in those versions (a `template`-disambiguated dependent alias-template
+# member access construct GCC accepts fine), fixed by clang-18. If your distro's newest
+# packaged clang is too old, fetch a clang-18+ release directly from
+# https://github.com/llvm/llvm-project/releases (self-contained tarball, no root needed).
 option(ENABLE_LLVM_COVERAGE "Enable Clang source-based coverage instrumentation for the jcef target (fork-safe alternative to ENABLE_COVERAGE's gcov)" OFF)
 if(ENABLE_LLVM_COVERAGE AND NOT CMAKE_SYSTEM_NAME STREQUAL "Windows")
   if(NOT CMAKE_BUILD_TYPE STREQUAL "Debug")
@@ -150,7 +156,7 @@ if(ENABLE_LLVM_COVERAGE AND NOT CMAKE_SYSTEM_NAME STREQUAL "Windows")
     set(CMAKE_BUILD_TYPE "Debug" CACHE STRING "" FORCE)
   endif()
   if(NOT CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
-    message(FATAL_ERROR "ENABLE_LLVM_COVERAGE requires clang: pass -DCMAKE_C_COMPILER=clang-14 -DCMAKE_CXX_COMPILER=clang++-14 (or your platform's clang) at configure time")
+    message(FATAL_ERROR "ENABLE_LLVM_COVERAGE requires clang-18+: pass -DCMAKE_C_COMPILER=<path to clang> -DCMAKE_CXX_COMPILER=<path to clang++> at configure time -- see the comment above this option if your distro's clang is older than 18")
   endif()
 endif()
 
