@@ -12,6 +12,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import org.cef.network.CefPostData;
 import org.cef.network.CefPostDataElement;
 import org.cef.network.CefPostDataElement.Type;
+import org.junit.jupiter.api.Disabled;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 
@@ -69,6 +70,18 @@ class CefPostDataTest {
         element.dispose();
     }
 
+    // CORRECTION (2026-08-30, coverage-stabilization session): the claim below
+    // ("no-ops... confirmed here") does not hold -- verified deterministically
+    // that this actually hits a real, unconditional CEF CHECK() in the Debug/
+    // coverage build: FATAL:.../post_data_element_ctocpp.cc:69] Check failed:
+    // !fileName.empty(). Same bug class as the already-documented issues
+    // #19/#20/#21 (CEF's own CHECK() firing on empty-string input instead of
+    // gracefully no-op'ing). Disabled per this project's standing strategy
+    // rather than trusted on unverified prior-session say-so -- see
+    // [[coverage_strategy_port_ceftests]] user memory.
+    @Disabled("Real CEF CHECK() failure on empty file name (post_data_element_"
+            + "ctocpp.cc:69), not a graceful no-op as the old comment claimed -- "
+            + "see method comment")
     @Test
     void elementSetToEmptyFilePathLeavesElementEmpty() {
         // CEF's own CefPostDataElement::SetToFile() no-ops on an empty file name

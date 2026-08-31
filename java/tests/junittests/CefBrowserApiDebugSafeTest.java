@@ -9,6 +9,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.cef.browser.CefBrowser;
 import org.cef.network.CefRequest;
+import org.junit.jupiter.api.Disabled;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 
@@ -26,6 +27,23 @@ import java.util.concurrent.TimeUnit;
 // real browser via TestFrame before doing anything else -- confirmed safe by
 // running the full suite in both Release and the coverage build after this
 // change, not just assumed.
+//
+// CORRECTION (2026-08-30, coverage-stabilization session): that "confirmed
+// safe" claim does NOT hold in isolation. Verified deterministically, 2/2
+// runs with no other class selected (and reproduced again as part of a small
+// 6-class --select-class run alongside 5 other classes that are each
+// independently reliable): this class crashes the whole process every time
+// before any @Test method even starts -- FATAL:mojo/public/cpp/bindings/lib/
+// interface_endpoint_client.cc:538] DCHECK failed: !has_pending_responders(),
+// preceded by several "Exception in thread AWT-EventQueue-0" with no visible
+// stack trace. Not root-caused; disabled per this project's standing
+// strategy (disable flaky/broken ported tests rather than chase the
+// underlying native crash -- see [[coverage_strategy_port_ceftests]] user
+// memory) rather than trusted as "safe" on unverified prior-session say-so.
+@Disabled("Deterministically crashes the process before any test runs when "
+        + "not preceded by enough other classes in the same run (mojo "
+        + "interface_endpoint_client.cc:538 DCHECK) -- not root-caused, see "
+        + "class comment")
 @ExtendWith(TestSetupExtension.class)
 class CefBrowserApiDebugSafeTest {
     private static final String TEST_URL = "http://test.com/browser_api_debug_safe.html";
