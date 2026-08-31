@@ -12,18 +12,25 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.cef.browser.CefBrowser;
 import org.cef.browser.CefFrame;
+import org.cef.handler.CefLoadHandlerAdapter;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+
+import java.util.concurrent.CountDownLatch;
 
 // Broad, low-risk coverage sweep of CefFrame_N.cpp (only 6% covered per Track
 // B's real gcovr run -- a large remaining gap for a small interface). Plain
 // synchronous calls against a live main frame, all invoked from the CEF UI
-// thread (see plan/roadmap.md's CefBrowserApiTest for why -- getMainFrame()
-// and friends were found to return null when called from the JUnit thread
-// after the fact).
-@ExtendWith(TestSetupExtension.class)
+// thread (see CefBrowserApiTest for why -- getMainFrame() and friends were
+// found to return null when called from the JUnit thread after the fact) --
+// captured here from inside the shared harness's onLoadEnd forwarding
+// (SharedBrowserExtension.addLoadHandler()), which runs on that same CEF UI
+// thread, rather than from the JUnit thread after loadPage() returns.
+//
+// Migrated to the shared-browser (Tier 1) harness -- see plan/roadmap.md's
+// "two-tier test harness" entry.
+@ExtendWith({TestSetupExtension.class, SharedBrowserExtension.class})
 class CefFrameApiTest {
-    private static final String TEST_URL = "http://test.com/frame_api.html";
     private static final String CONTENT = "<html><body>frame api test</body></html>";
 
     @Test
@@ -34,19 +41,12 @@ class CefFrameApiTest {
         boolean[] isMain = {false};
         boolean[] isValid = {false};
         CefFrame[] parent = {null};
+        CountDownLatch done = new CountDownLatch(1);
 
-        TestFrame frame = new TestFrame() {
+        SharedBrowserExtension.addLoadHandler(new CefLoadHandlerAdapter() {
             @Override
-            protected void setupTest() {
-                addResource(TEST_URL, CONTENT, "text/html");
-                createBrowser(TEST_URL, true /* useOSR */);
-                super.setupTest();
-            }
-
-            @Override
-            public void onLoadingStateChange(CefBrowser browser, boolean isLoading,
-                    boolean canGoBack, boolean canGoForward) {
-                if (isLoading) return;
+            public void onLoadEnd(CefBrowser browser, CefFrame frame, int httpStatusCode) {
+                if (!frame.isMain()) return;
 
                 CefFrame mainFrame = browser.getMainFrame();
                 identifier[0] = mainFrame.getIdentifier();
@@ -64,15 +64,16 @@ class CefFrameApiTest {
                 mainFrame.paste();
                 mainFrame.selectAll();
 
-                terminateTest();
+                done.countDown();
             }
-        };
+        });
 
-        frame.awaitCompletion();
+        String loadedUrl = SharedBrowserExtension.loadPage(CONTENT);
+        SharedBrowserExtension.awaitLatch(done, 15);
 
         assertNotNull(identifier[0]);
         assertFalse(identifier[0].isEmpty());
-        assertEquals(TEST_URL, url[0]);
+        assertEquals(loadedUrl, url[0]);
         assertNotNull(name[0]);
         assertTrue(isMain[0]);
         assertTrue(isValid[0]);

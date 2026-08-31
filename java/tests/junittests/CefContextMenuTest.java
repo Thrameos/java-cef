@@ -62,6 +62,27 @@ import java.awt.event.MouseEvent;
 // this suite's established JNI-callback-thread-exception-safety pattern
 // (asserting directly inside a native callback can corrupt later browser
 // teardown).
+//
+// DELIBERATELY STAYS ON TestFrame -- migration to the shared-browser (Tier
+// 1) harness was tried and reverted (2026-08-31, stage-2 migration sweep):
+// combined with another Tier-1-migrated browser test running nearby in the
+// same JVM (CefBrowserApiDebugSafeTest), this test's synthetic-click
+// javax.swing.Timer + canvas.dispatchEvent() technique reproduced a real,
+// ~50% intermittent hang -- confirmed via gdb (launch-under-gdb + SIGINT,
+// see the jpype technique in plan/roadmap.md): the AWT-EventQueue-0 thread
+// dies after a burst of a dozen+ back-to-back "Exception in thread
+// AWT-EventQueue-0" prints with NO stack trace text at all (consistent
+// with a StackOverflowError recurring even while trying to print itself),
+// after which the harness's SwingUtilities.invokeAndWait() calls block
+// forever with no EDT left to service them. Neither test alone (nor this
+// test combined with the OTHER three Tier-1 classes migrated the same
+// session -- CefFrameApiTest/WindowlessFrameRateTest/
+// CefSchemeHandlerFactoryTest) reproduced it in repeated runs; it needs
+// this test's synthetic AWT event storm specifically. Not root-caused
+// further -- do not re-attempt this migration without first understanding
+// the actual recursion (a Java-level `jstack`/thread-dump technique, not
+// gdb's native-only backtraces, is needed to see it actively looping
+// rather than catching threads already idle after the EDT has died).
 @ExtendWith(TestSetupExtension.class)
 class CefContextMenuTest {
     private static final String TEST_URL = "http://test.com/context_menu.html";

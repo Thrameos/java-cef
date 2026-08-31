@@ -9,72 +9,46 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.cef.browser.CefBrowser;
 import org.cef.network.CefRequest;
-import org.junit.jupiter.api.Disabled;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 
 import java.awt.image.BufferedImage;
-import java.util.concurrent.TimeUnit;
+import java.util.concurrent.CountDownLatch;
 
 // Split out of CefBrowserApiTest (see the comment there): these two methods
 // were bisected via --select-method isolation and confirmed to NOT trigger
 // the Debug/coverage-build mojo crash that CefBrowserApiTest's
 // frameNavigationAndZoomApis() does, so they're safe to include in the
-// ENABLE_COVERAGE Debug-build gcovr measurement run. Unlike the earlier
-// CefPostDataTest split (reverted -- see plan/roadmap.md's "FINDING" section
-// and issue #16), this split does NOT carry the same
-// first-native-object-in-the-process risk, since both methods here create a
-// real browser via TestFrame before doing anything else -- confirmed safe by
-// running the full suite in both Release and the coverage build after this
-// change, not just assumed.
+// ENABLE_COVERAGE Debug-build gcovr measurement run.
 //
-// CORRECTION (2026-08-30, coverage-stabilization session): that "confirmed
-// safe" claim does NOT hold in isolation. Verified deterministically, 2/2
-// runs with no other class selected (and reproduced again as part of a small
-// 6-class --select-class run alongside 5 other classes that are each
-// independently reliable): this class crashes the whole process every time
-// before any @Test method even starts -- FATAL:mojo/public/cpp/bindings/lib/
-// interface_endpoint_client.cc:538] DCHECK failed: !has_pending_responders(),
-// preceded by several "Exception in thread AWT-EventQueue-0" with no visible
-// stack trace. Not root-caused; disabled per this project's standing
-// strategy (disable flaky/broken ported tests rather than chase the
-// underlying native crash -- see [[coverage_strategy_port_ceftests]] user
-// memory) rather than trusted as "safe" on unverified prior-session say-so.
-@Disabled("Deterministically crashes the process before any test runs when "
-        + "not preceded by enough other classes in the same run (mojo "
-        + "interface_endpoint_client.cc:538 DCHECK) -- not root-caused, see "
-        + "class comment")
-@ExtendWith(TestSetupExtension.class)
+// Migrated to the shared-browser (Tier 1) harness -- see plan/roadmap.md's
+// "two-tier test harness" entry. This class was previously @Disabled: it
+// deterministically crashed the whole process (mojo interface_endpoint_
+// client.cc:538 DCHECK) when it wasn't preceded by enough other classes in
+// the same run -- i.e. exactly the "first real browser usage in the
+// process" cold-start hazard class documented for LoadErrorTest's cold-
+// start bug and CefBrowserApiDebugSafeTest's own class comment. Moving this
+// onto SharedBrowserExtension means it now runs against the harness's own
+// warmed-up shared browser (see initializeSharedBrowser()) instead of a
+// freshly created one -- re-verified clean (no crash) in isolated
+// --select-class runs before removing @Disabled; if this class starts
+// crashing again in some future environment, re-add @Disabled rather than
+// chasing the underlying native crash further (see [[coverage_strategy_
+// port_ceftests]] user memory).
+@ExtendWith({TestSetupExtension.class, SharedBrowserExtension.class})
 class CefBrowserApiDebugSafeTest {
-    private static final String TEST_URL = "http://test.com/browser_api_debug_safe.html";
     private static final String CONTENT = "<html><head><title>API Test</title></head>"
             + "<body>debug-safe browser API test</body></html>";
 
     @Test
     void executeJavaScriptAndLoadRequestDoNotThrow() {
-        TestFrame frame = new TestFrame() {
-            @Override
-            protected void setupTest() {
-                addResource(TEST_URL, CONTENT, "text/html");
-                createBrowser(TEST_URL, true /* useOSR */);
-                super.setupTest();
-            }
+        String loadedUrl = SharedBrowserExtension.loadPage(CONTENT);
 
-            @Override
-            public void onLoadingStateChange(CefBrowser browser, boolean isLoading,
-                    boolean canGoBack, boolean canGoForward) {
-                if (isLoading) return;
-                terminateTest();
-            }
-        };
-
-        frame.awaitCompletion();
-
-        CefBrowser browser = frame.browser_;
+        CefBrowser browser = SharedBrowserExtension.browser();
         browser.executeJavaScript("1+1;", browser.getURL(), 1);
 
         CefRequest request = CefRequest.create();
-        request.setURL(TEST_URL);
+        request.setURL(loadedUrl);
         browser.loadRequest(request);
     }
 
@@ -82,34 +56,23 @@ class CefBrowserApiDebugSafeTest {
     void createScreenshotReturnsARealImage() {
         BufferedImage[] image = {null};
         boolean[] gotImage = {false};
+        CountDownLatch done = new CountDownLatch(1);
 
-        TestFrame frame = new TestFrame() {
-            @Override
-            protected void setupTest() {
-                addResource(TEST_URL, CONTENT, "text/html");
-                createBrowser(TEST_URL, true /* useOSR */);
-                super.setupTest();
+        SharedBrowserExtension.loadPage(CONTENT);
+
+        CefBrowser browser = SharedBrowserExtension.browser();
+        browser.createScreenshot(false /* nativeResolution */).whenComplete((img, ex) -> {
+            if (ex == null) {
+                image[0] = img;
+                gotImage[0] = true;
             }
+            done.countDown();
+        });
 
-            @Override
-            public void onLoadingStateChange(CefBrowser browser, boolean isLoading,
-                    boolean canGoBack, boolean canGoForward) {
-                if (isLoading) return;
-                browser.createScreenshot(false /* nativeResolution */)
-                        .whenComplete((img, ex) -> {
-                            if (ex == null) {
-                                image[0] = img;
-                                gotImage[0] = true;
-                            }
-                            terminateTest();
-                        });
-            }
-        };
-
-        // A longer timeout than the 30s default: an isolated run showed the
-        // default get(15, SECONDS) inline wasn't enough headroom in this
-        // headless OSR/GL environment.
-        frame.awaitCompletion(45, TimeUnit.SECONDS);
+        // A longer timeout than the 15s default: an isolated run showed the
+        // default headroom wasn't enough in this headless OSR/GL
+        // environment.
+        SharedBrowserExtension.awaitLatch(done, 45);
 
         assertTrue(gotImage[0], "createScreenshot's future never completed successfully");
         assertNotNull(image[0]);

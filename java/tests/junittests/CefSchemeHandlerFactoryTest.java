@@ -20,13 +20,18 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 
 import java.nio.ByteBuffer;
+import java.util.concurrent.CountDownLatch;
 
 // Exercises native/scheme_handler_factory.cpp (0% covered per this session's
 // baseline gcovr run; see plan/roadmap.md Phase 2) -- a distinct code path from
 // TestFrame's addResource()/CefResourceRequestHandler mechanism used by every other
 // test in this package: CefApp.registerSchemeHandlerFactory() registers a factory
 // for a (scheme, domain) pair at the CefApp level rather than per-request.
-@ExtendWith(TestSetupExtension.class)
+// factoryServesContentToARealBrowser() is migrated to the shared-browser
+// (Tier 1) harness -- see plan/roadmap.md's "two-tier test harness" entry;
+// registerAndClearReturnTrue() never touches a browser, so there's nothing
+// to migrate for it.
+@ExtendWith({TestSetupExtension.class, SharedBrowserExtension.class})
 class CefSchemeHandlerFactoryTest {
     private static final String DOMAIN = "jcef-scheme-factory-test.invalid";
     private static final String TEST_URL = "http://" + DOMAIN + "/page.html";
@@ -77,36 +82,29 @@ class CefSchemeHandlerFactoryTest {
     @Test
     void factoryServesContentToARealBrowser() {
         boolean[] gotTitle = {false};
+        CountDownLatch done = new CountDownLatch(1);
 
-        TestFrame frame = new TestFrame() {
-            @Override
-            protected void setupTest() {
-                CefApp.getInstance().registerSchemeHandlerFactory(
-                        "http", DOMAIN, (browser, frame, schemeName, request) -> {
-                            return new FixedContentHandler();
-                        });
-
-                client_.addDisplayHandler(new CefDisplayHandlerAdapter() {
-                    @Override
-                    public void onTitleChange(CefBrowser browser, String title) {
-                        if (gotTitle[0] || !"from-factory".equals(title)) return;
-                        gotTitle[0] = true;
-                        terminateTest();
-                    }
+        CefApp.getInstance().registerSchemeHandlerFactory(
+                "http", DOMAIN, (browser, frame, schemeName, request) -> {
+                    return new FixedContentHandler();
                 });
+        try {
+            SharedBrowserExtension.addDisplayHandler(new CefDisplayHandlerAdapter() {
+                @Override
+                public void onTitleChange(CefBrowser browser, String title) {
+                    if (gotTitle[0] || !"from-factory".equals(title)) return;
+                    gotTitle[0] = true;
+                    done.countDown();
+                }
+            });
 
-                createBrowser(TEST_URL, true /* useOSR */);
-                super.setupTest();
+            SharedBrowserExtension.navigateTo(TEST_URL);
+            if (!gotTitle[0]) {
+                SharedBrowserExtension.awaitLatch(done, 15);
             }
-
-            @Override
-            protected void cleanupTest() {
-                CefApp.getInstance().clearSchemeHandlerFactories();
-                super.cleanupTest();
-            }
-        };
-
-        frame.awaitCompletion();
+        } finally {
+            CefApp.getInstance().clearSchemeHandlerFactories();
+        }
 
         assertTrue(gotTitle[0], "Page served via CefSchemeHandlerFactory never loaded");
     }
