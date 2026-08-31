@@ -8,7 +8,6 @@ import org.cef.browser.CefRequestContext;
 import org.cef.callback.CefSchemeHandlerFactory;
 import org.cef.handler.CefAppHandler;
 import org.cef.handler.CefAppHandlerAdapter;
-import org.cef.misc.JCefTrace;
 import org.cef.network.CefCookieManager;
 
 import java.awt.event.ActionEvent;
@@ -18,6 +17,7 @@ import java.io.FilenameFilter;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.HashSet;
+import java.util.logging.Logger;
 
 import javax.swing.SwingUtilities;
 import javax.swing.Timer;
@@ -26,6 +26,8 @@ import javax.swing.Timer;
  * Exposes static methods for managing the global CEF context.
  */
 public class CefApp extends CefAppHandlerAdapter {
+    private static final Logger LOGGER = Logger.getLogger(CefApp.class.getName());
+
     public final class CefVersion {
         public final int JCEF_COMMIT_NUMBER;
 
@@ -148,7 +150,7 @@ public class CefApp extends CefAppHandlerAdapter {
      */
     private CefApp(String[] args, CefSettings settings) throws UnsatisfiedLinkError {
         super(args);
-        JCefTrace.trace("CefApp() constructor ENTER on %s", Thread.currentThread());
+        LOGGER.fine(() -> "CefApp() constructor ENTER on " + Thread.currentThread());
         if (settings != null) settings_ = settings.clone();
         if (OS.isWindows()) {
             SystemBootstrap.loadLibrary("jawt");
@@ -169,11 +171,11 @@ public class CefApp extends CefAppHandlerAdapter {
             Runnable r = new Runnable() {
                 @Override
                 public void run() {
-                    JCefTrace.trace("CefApp N_PreInitialize() CALL on %s", Thread.currentThread());
+                    LOGGER.fine(() -> "CefApp N_PreInitialize() CALL on " + Thread.currentThread());
                     // Perform native pre-initialization.
                     if (!N_PreInitialize())
                         throw new IllegalStateException("Failed to pre-initialize native code");
-                    JCefTrace.trace("CefApp N_PreInitialize() RETURNED ok");
+                    LOGGER.fine("CefApp N_PreInitialize() RETURNED ok");
                 }
             };
             if (SwingUtilities.isEventDispatchThread())
@@ -282,7 +284,7 @@ public class CefApp extends CefAppHandlerAdapter {
      * message loop is terminated and CEF is shutdown.
      */
     public synchronized final void dispose() {
-        JCefTrace.trace("CefApp.dispose() ENTER state=%s clients=%d", getState(), clients_.size());
+        LOGGER.fine(() -> "CefApp.dispose() ENTER state=" + getState() + " clients=" + clients_.size());
         switch (getState()) {
             case NEW:
                 // Nothing to do inspite of invalidating the state
@@ -437,9 +439,9 @@ public class CefApp extends CefAppHandlerAdapter {
                         }
                     }
 
-                    JCefTrace.trace("CefApp N_Initialize() CALL on %s", Thread.currentThread());
+                    LOGGER.fine(() -> "CefApp N_Initialize() CALL on " + Thread.currentThread());
                     boolean initOk = N_Initialize(appHandler_, settings);
-                    JCefTrace.trace("CefApp N_Initialize() RETURNED %s", initOk);
+                    LOGGER.fine(() -> "CefApp N_Initialize() RETURNED " + initOk);
                     if (initOk) {
                         setState(CefAppState.INITIALIZED);
                     } else {
@@ -484,7 +486,7 @@ public class CefApp extends CefAppHandlerAdapter {
             @Override
             public void run() {
                 System.out.println("shutdown on " + Thread.currentThread());
-                JCefTrace.trace("CefApp.shutdown() Runnable ENTER on %s", Thread.currentThread());
+                LOGGER.fine(() -> "CefApp.shutdown() Runnable ENTER on " + Thread.currentThread());
 
                 // Cancel any pending message-pump Timer tick before it can
                 // fire after native shutdown below. Belt-and-suspenders
@@ -502,14 +504,14 @@ public class CefApp extends CefAppHandlerAdapter {
                 // registered in CEF's internal browser-context tracking past
                 // CefShutdown(), tripping a DCHECK during final process teardown.
                 // See Thrameos/java-cef#23.
-                JCefTrace.trace("CefApp.shutdown() disposeGlobalContext/disposeGlobalManager");
+                LOGGER.fine("CefApp.shutdown() disposeGlobalContext/disposeGlobalManager");
                 CefRequestContext.disposeGlobalContext();
                 CefCookieManager.disposeGlobalManager();
 
                 // Shutdown native CEF.
-                JCefTrace.trace("CefApp.shutdown() N_Shutdown() CALL");
+                LOGGER.fine("CefApp.shutdown() N_Shutdown() CALL");
                 N_Shutdown();
-                JCefTrace.trace("CefApp.shutdown() N_Shutdown() RETURNED");
+                LOGGER.fine("CefApp.shutdown() N_Shutdown() RETURNED");
 
                 setState(CefAppState.TERMINATED);
                 CefApp.self = null;

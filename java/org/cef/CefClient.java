@@ -37,7 +37,6 @@ import org.cef.handler.CefScreenInfo;
 import org.cef.handler.CefWindowHandler;
 import org.cef.misc.BoolRef;
 import org.cef.misc.CefPrintSettings;
-import org.cef.misc.JCefTrace;
 import org.cef.misc.StringRef;
 import org.cef.network.CefRequest;
 import org.cef.network.CefRequest.TransitionType;
@@ -58,6 +57,7 @@ import java.util.ArrayList;
 import java.util.Collection;
 import java.util.HashMap;
 import java.util.Vector;
+import java.util.logging.Logger;
 import java.util.function.Consumer;
 
 import javax.swing.SwingUtilities;
@@ -70,6 +70,7 @@ public class CefClient extends CefClientHandler
                    CefDragHandler, CefFocusHandler, CefJSDialogHandler, CefKeyboardHandler,
                    CefLifeSpanHandler, CefLoadHandler, CefPrintHandler, CefRenderHandler,
                    CefRequestHandler, CefWindowHandler {
+    private static final Logger LOGGER = Logger.getLogger(CefClient.class.getName());
     private HashMap<Integer, CefBrowser> browser_ = new HashMap<Integer, CefBrowser>();
     private CefContextMenuHandler contextMenuHandler_ = null;
     private CefDialogHandler dialogHandler_ = null;
@@ -590,19 +591,17 @@ public class CefClient extends CefClientHandler
     @Override
     public void onBeforeClose(CefBrowser browser) {
         if (browser == null) return;
-        JCefTrace.trace("CefClient.onBeforeClose() ENTER browser_id=%d",
-                browser.getIdentifier());
+        LOGGER.fine(() -> "CefClient.onBeforeClose() ENTER browser_id=" + browser.getIdentifier());
         if (lifeSpanHandler_ != null) lifeSpanHandler_.onBeforeClose(browser);
         browser.onBeforeClose();
 
         // remove browser reference
         cleanupBrowser(browser.getIdentifier());
-        JCefTrace.trace("CefClient.onBeforeClose() EXIT browser_id=%d",
-                browser.getIdentifier());
+        LOGGER.fine(() -> "CefClient.onBeforeClose() EXIT browser_id=" + browser.getIdentifier());
     }
 
     private void cleanupBrowser(int identifier) {
-        JCefTrace.trace("CefClient.cleanupBrowser(%d) ENTER", identifier);
+        LOGGER.fine(() -> "CefClient.cleanupBrowser(" + identifier + ") ENTER");
         synchronized (browser_) {
             if (identifier >= 0) {
                 // Remove the specific browser that closed.
@@ -618,7 +617,7 @@ public class CefClient extends CefClientHandler
                 for (CefBrowser browser : browserList) {
                     browser.close(true);
                 }
-                JCefTrace.trace("CefClient.cleanupBrowser(%d) EXIT (closed all)", identifier);
+                LOGGER.fine(() -> "CefClient.cleanupBrowser(" + identifier + ") EXIT (closed all)");
                 return;
             }
 
@@ -631,42 +630,41 @@ public class CefClient extends CefClientHandler
                 handlersRemoved_ = true;
                 KeyboardFocusManager.getCurrentKeyboardFocusManager().removePropertyChangeListener(
                         propertyChangeListener);
-                JCefTrace.trace("cleanupBrowser: removeContextMenuHandler CALL");
+                LOGGER.fine("cleanupBrowser: removeContextMenuHandler CALL");
                 removeContextMenuHandler(this);
-                JCefTrace.trace("cleanupBrowser: removeDialogHandler CALL");
+                LOGGER.fine("cleanupBrowser: removeDialogHandler CALL");
                 removeDialogHandler(this);
-                JCefTrace.trace("cleanupBrowser: removeDisplayHandler CALL");
+                LOGGER.fine("cleanupBrowser: removeDisplayHandler CALL");
                 removeDisplayHandler(this);
-                JCefTrace.trace("cleanupBrowser: removeDownloadHandler CALL");
+                LOGGER.fine("cleanupBrowser: removeDownloadHandler CALL");
                 removeDownloadHandler(this);
-                JCefTrace.trace("cleanupBrowser: removeDragHandler CALL");
+                LOGGER.fine("cleanupBrowser: removeDragHandler CALL");
                 removeDragHandler(this);
-                JCefTrace.trace("cleanupBrowser: removeFocusHandler CALL");
+                LOGGER.fine("cleanupBrowser: removeFocusHandler CALL");
                 removeFocusHandler(this);
-                JCefTrace.trace("cleanupBrowser: removeJSDialogHandler CALL");
+                LOGGER.fine("cleanupBrowser: removeJSDialogHandler CALL");
                 removeJSDialogHandler(this);
-                JCefTrace.trace("cleanupBrowser: removeKeyboardHandler CALL");
+                LOGGER.fine("cleanupBrowser: removeKeyboardHandler CALL");
                 removeKeyboardHandler(this);
-                JCefTrace.trace("cleanupBrowser: removeLifeSpanHandler CALL");
+                LOGGER.fine("cleanupBrowser: removeLifeSpanHandler CALL");
                 removeLifeSpanHandler(this);
-                JCefTrace.trace("cleanupBrowser: removeLoadHandler CALL");
+                LOGGER.fine("cleanupBrowser: removeLoadHandler CALL");
                 removeLoadHandler(this);
-                JCefTrace.trace("cleanupBrowser: removePrintHandler CALL");
+                LOGGER.fine("cleanupBrowser: removePrintHandler CALL");
                 removePrintHandler(this);
-                JCefTrace.trace("cleanupBrowser: removeRenderHandler CALL");
+                LOGGER.fine("cleanupBrowser: removeRenderHandler CALL");
                 removeRenderHandler(this);
-                JCefTrace.trace("cleanupBrowser: removeRequestHandler CALL");
+                LOGGER.fine("cleanupBrowser: removeRequestHandler CALL");
                 removeRequestHandler(this);
-                JCefTrace.trace("cleanupBrowser: removeWindowHandler CALL");
+                LOGGER.fine("cleanupBrowser: removeWindowHandler CALL");
                 removeWindowHandler(this);
-                JCefTrace.trace("cleanupBrowser: all remove*Handler calls done, "
-                        + "calling super.dispose()");
+                LOGGER.fine("cleanupBrowser: all remove*Handler calls done, calling super.dispose()");
                 super.dispose();
 
                 CefApp.getInstance().clientWasDisposed(this);
             }
         }
-        JCefTrace.trace("CefClient.cleanupBrowser(%d) EXIT", identifier);
+        LOGGER.fine(() -> "CefClient.cleanupBrowser(" + identifier + ") EXIT");
     }
 
     // CefLoadHandler
