@@ -38,20 +38,18 @@ class CefSettingsTest {
     }
 
     @Test
-    void colorTypeHighAlphaSignExtends() {
-        // ColorType(int,int,int,int) packs components via 32-bit int arithmetic
-        // ((alpha << 24) | ...) and only then assigns the result to the long-typed
-        // color_value field. With alpha >= 0x80 the packed int is negative (top bit
-        // set), and Java's implicit int->long widening sign-extends it -- so
-        // getColor() does NOT return the unsigned 32-bit ARGB value a caller would
-        // expect (0xFF112233L); it returns a value with all the long's upper 32 bits
-        // set to 1. This is a real, reproducible bug in CefSettings.ColorType
-        // (logged as a fork issue rather than fixed here -- see plan/findings.md);
-        // this test documents the actual current behavior rather than the intended
-        // one.
+    void colorTypeHighAlphaDoesNotSignExtend() {
+        // Regression test for Thrameos/java-cef#8: ColorType(int,int,int,int) used
+        // to pack components via 32-bit int arithmetic ((alpha << 24) | ...) and
+        // only then assign the result to the long-typed color_value field. With
+        // alpha >= 0x80 the packed int was negative (top bit set), and Java's
+        // implicit int->long widening sign-extended it, so getColor() returned a
+        // value with all the long's upper 32 bits set to 1 instead of the plain
+        // unsigned 32-bit ARGB value this field's own Javadoc describes. Fixed by
+        // packing in long-typed arithmetic and masking to 32 bits.
         CefSettings settings = new CefSettings();
         ColorType color = settings.new ColorType(0xFF, 0x11, 0x22, 0x33);
-        assertEquals(0xFFFFFFFFFF112233L, color.getColor());
+        assertEquals(0xFF112233L, color.getColor());
     }
 
     @Test
