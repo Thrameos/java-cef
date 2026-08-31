@@ -483,6 +483,11 @@ public class SharedBrowserExtension implements BeforeAllCallback, BeforeEachCall
         trackCleanup(client_::removeContextMenuHandler);
     }
 
+    public static void addDialogHandler(org.cef.handler.CefDialogHandler handler) {
+        client_.addDialogHandler(handler);
+        trackCleanup(client_::removeDialogHandler);
+    }
+
     public static void addDisplayHandler(CefDisplayHandler handler) {
         client_.addDisplayHandler(handler);
         trackCleanup(client_::removeDisplayHandler);

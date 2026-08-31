@@ -28,9 +28,11 @@ import java.awt.event.MouseMotionListener;
 // here -- both require real hover-dwell/user-gesture semantics that are fragile
 // to synthesize reliably in a headless OSR test; left as an open gap rather than
 // a flaky test.
-@ExtendWith(TestSetupExtension.class)
+//
+// Migrated to the shared-browser (Tier 1) harness -- see plan/roadmap.md's
+// "two-tier test harness" entry.
+@ExtendWith({TestSetupExtension.class, SharedBrowserExtension.class})
 class CefDisplayHandlerCoverageTest {
-    private static final String TEST_URL = "http://test.com/display_handler_coverage.html";
     private static final String CONTENT = "<html><body>"
             + "<div id='cursorTarget' style='position:absolute; left:5px; top:5px; "
             + "width:50px; height:50px; cursor:pointer;'>hover me</div>"
@@ -43,88 +45,64 @@ class CefDisplayHandlerCoverageTest {
         String[] lastConsoleMessage = {null};
         Integer[] lastCursorId = {null};
 
-        TestFrame frame = new TestFrame() {
+        SharedBrowserExtension.addDisplayHandler(new CefDisplayHandlerAdapter() {
             @Override
-            protected void setupTest() {
-                client_.addDisplayHandler(new CefDisplayHandlerAdapter() {
-                    @Override
-                    public void onAddressChange(CefBrowser browser, CefFrame frame, String url) {
-                        lastAddress[0] = url;
-                    }
-
-                    @Override
-                    public void onTitleChange(CefBrowser browser, String title) {
-                        lastTitle[0] = title;
-                    }
-
-                    @Override
-                    public boolean onConsoleMessage(CefBrowser browser,
-                            org.cef.CefSettings.LogSeverity level, String message, String source,
-                            int line) {
-                        lastConsoleMessage[0] = message;
-                        return false;
-                    }
-
-                    @Override
-                    public boolean onCursorChange(CefBrowser browser, int cursorType) {
-                        lastCursorId[0] = cursorType;
-                        return false;
-                    }
-                });
-
-                addResource(TEST_URL, CONTENT, "text/html");
-                createBrowser(TEST_URL, true /* useOSR */);
-                super.setupTest();
+            public void onAddressChange(CefBrowser browser, CefFrame frame, String url) {
+                lastAddress[0] = url;
             }
 
             @Override
-            public void onLoadingStateChange(CefBrowser browser, boolean isLoading,
-                    boolean canGoBack, boolean canGoForward) {
-                if (isLoading) return;
-
-                browser.executeJavaScript("document.title = 'coverage-test-title';",
-                        browser.getURL(), 1);
-                browser.executeJavaScript("console.log('coverage-test-console-message');",
-                        browser.getURL(), 1);
-
-                Component canvas = browser.getUIComponent();
-                MouseEvent entered = new MouseEvent(canvas, MouseEvent.MOUSE_ENTERED,
-                        System.currentTimeMillis(), 0, 0, 0, 0, false);
-                for (MouseListener listener : canvas.getMouseListeners()) {
-                    listener.mouseEntered(entered);
-                }
-                // A move from outside the styled element to inside it -- some
-                // renderers compute hover/cursor state from the transition,
-                // not a single absolute position.
-                MouseEvent outside = new MouseEvent(canvas, MouseEvent.MOUSE_MOVED,
-                        System.currentTimeMillis(), 0, 0, 0, 0, false);
-                MouseEvent inside = new MouseEvent(canvas, MouseEvent.MOUSE_MOVED,
-                        System.currentTimeMillis(), 0, 20, 20, 0, false);
-                for (MouseMotionListener listener : canvas.getMouseMotionListeners()) {
-                    listener.mouseMoved(outside);
-                    listener.mouseMoved(inside);
-                }
-
-                // Settle off the CEF UI thread -- these callbacks arrive
-                // asynchronously (JS execution, renderer-side hit-testing for
-                // the cursor change) and this callback itself runs on that
-                // same thread, so blocking here would prevent them from ever
-                // being delivered. TestFrame's own 30s Watchdog is the
-                // backstop if something never fires.
-                new Thread(() -> {
-                    try {
-                        Thread.sleep(3000);
-                    } catch (InterruptedException e) {
-                        Thread.currentThread().interrupt();
-                    }
-                    terminateTest();
-                }).start();
+            public void onTitleChange(CefBrowser browser, String title) {
+                lastTitle[0] = title;
             }
-        };
 
-        frame.awaitCompletion();
+            @Override
+            public boolean onConsoleMessage(CefBrowser browser,
+                    org.cef.CefSettings.LogSeverity level, String message, String source,
+                    int line) {
+                lastConsoleMessage[0] = message;
+                return false;
+            }
 
-        assertEquals(TEST_URL, lastAddress[0]);
+            @Override
+            public boolean onCursorChange(CefBrowser browser, int cursorType) {
+                lastCursorId[0] = cursorType;
+                return false;
+            }
+        });
+
+        String testUrl = SharedBrowserExtension.loadPage(CONTENT);
+        CefBrowser browser = SharedBrowserExtension.browser();
+
+        browser.executeJavaScript(
+                "document.title = 'coverage-test-title';", browser.getURL(), 1);
+        browser.executeJavaScript(
+                "console.log('coverage-test-console-message');", browser.getURL(), 1);
+
+        Component canvas = browser.getUIComponent();
+        MouseEvent entered = new MouseEvent(
+                canvas, MouseEvent.MOUSE_ENTERED, System.currentTimeMillis(), 0, 0, 0, 0, false);
+        for (MouseListener listener : canvas.getMouseListeners()) {
+            listener.mouseEntered(entered);
+        }
+        // A move from outside the styled element to inside it -- some
+        // renderers compute hover/cursor state from the transition, not a
+        // single absolute position.
+        MouseEvent outside = new MouseEvent(
+                canvas, MouseEvent.MOUSE_MOVED, System.currentTimeMillis(), 0, 0, 0, 0, false);
+        MouseEvent inside = new MouseEvent(
+                canvas, MouseEvent.MOUSE_MOVED, System.currentTimeMillis(), 0, 20, 20, 0, false);
+        for (MouseMotionListener listener : canvas.getMouseMotionListeners()) {
+            listener.mouseMoved(outside);
+            listener.mouseMoved(inside);
+        }
+
+        // These callbacks arrive asynchronously (JS execution, renderer-side
+        // hit-testing for the cursor change), so give them time to settle
+        // before asserting.
+        Thread.sleep(3000);
+
+        assertEquals(testUrl, lastAddress[0]);
         assertEquals("coverage-test-title", lastTitle[0]);
         assertEquals("coverage-test-console-message", lastConsoleMessage[0]);
 

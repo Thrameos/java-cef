@@ -8,8 +8,12 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.cef.browser.CefBrowser;
+import org.cef.handler.CefLoadHandlerAdapter;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+
+import java.util.concurrent.CountDownLatch;
+import javax.swing.SwingUtilities;
 
 // Round 2 of the CefBrowser_N.cpp API sweep (still the single largest
 // remaining gap after CefBrowserApiTest/CefBrowserApiDebugSafeTest -- see
@@ -19,106 +23,70 @@ import org.junit.jupiter.api.extension.ExtendWith;
 // plain synchronous API calls against a live browser, same low-risk pattern
 // as the earlier sweep.
 //
-// Sequenced via onLoadingStateChange() (which hands canGoBack/canGoForward
-// directly as parameters) rather than onTitleChange() -- an earlier version
-// of this test called browser.canGoBack() itself from inside onTitleChange()
-// and got a stale/false answer, apparently because history-entry commit can
-// lag the title-change event slightly; onLoadingStateChange's own
-// isLoading=false transition is the more reliable signal already used
-// elsewhere in this suite for sequencing multi-step navigation flows.
-@ExtendWith(TestSetupExtension.class)
+// Migrated to the shared-browser (Tier 1) harness -- see plan/roadmap.md's
+// "two-tier test harness" entry. Unlike the original TestFrame version
+// (which drove the whole back/forward/back/forward sequence from inside a
+// single onLoadingStateChange() callback, cascading each next step off the
+// previous one's completion), this version drives each navigation step from
+// the JUnit thread itself, waiting on a fresh latch per step -- closer to
+// how a real embedding application actually issues navigation commands (in
+// response to independent, separate UI events), not a pattern real usage
+// exhibits. See SharedBrowserExtension's own class comment on this
+// distinction.
+@ExtendWith({TestSetupExtension.class, SharedBrowserExtension.class})
 class CefBrowserNavigationHistoryTest {
-    private static final String PAGE_ONE_URL = "http://test.com/nav_history_one.html";
-    private static final String PAGE_TWO_URL = "http://test.com/nav_history_two.html";
-
-    @Test
-    void backAndForwardNavigationWorks() {
-        boolean[] done = {false};
-        boolean[] couldGoBackAfterSecondLoad = {false};
-        boolean[] couldGoForwardAfterSecondLoad = {true};
-        boolean[] couldGoForwardAfterBack = {false};
-        String[] urlAfterBack = {null};
-        String[] urlAfterForward = {null};
-
-        TestFrame frame = new TestFrame() {
-            int state = 0;
-
-            @Override
-            protected void setupTest() {
-                addResource(PAGE_ONE_URL, "<html><body>one</body></html>", "text/html");
-                addResource(PAGE_TWO_URL, "<html><body>two</body></html>", "text/html");
-                createBrowser(PAGE_ONE_URL, true /* useOSR */);
-                super.setupTest();
-            }
-
+    private static void awaitNavigation(Runnable navigate) {
+        CountDownLatch done = new CountDownLatch(1);
+        SharedBrowserExtension.addLoadHandler(new CefLoadHandlerAdapter() {
             @Override
             public void onLoadingStateChange(CefBrowser browser, boolean isLoading,
                     boolean canGoBack, boolean canGoForward) {
-                if (isLoading) return;
-                switch (state) {
-                    case 0:
-                        state = 1;
-                        browser.loadURL(PAGE_TWO_URL);
-                        break;
-                    case 1:
-                        state = 2;
-                        couldGoBackAfterSecondLoad[0] = canGoBack;
-                        couldGoForwardAfterSecondLoad[0] = canGoForward;
-                        browser.goBack();
-                        break;
-                    case 2:
-                        state = 3;
-                        urlAfterBack[0] = browser.getURL();
-                        couldGoForwardAfterBack[0] = canGoForward;
-                        browser.goForward();
-                        break;
-                    case 3:
-                        state = 4;
-                        urlAfterForward[0] = browser.getURL();
-                        done[0] = true;
-                        terminateTest();
-                        break;
-                    default:
-                        break;
-                }
+                if (!isLoading) done.countDown();
             }
-        };
-
-        frame.awaitCompletion();
-
-        assertTrue(done[0], "Navigation history sequence never completed");
-        assertTrue(couldGoBackAfterSecondLoad[0], "canGoBack() should be true after two loads");
-        assertFalse(couldGoForwardAfterSecondLoad[0],
-                "canGoForward() should be false before going back");
-        assertTrue(couldGoForwardAfterBack[0], "canGoForward() should be true after going back");
-        assertTrue(PAGE_ONE_URL.equals(urlAfterBack[0]), "Expected " + PAGE_ONE_URL + " after "
-                + "goBack(), got " + urlAfterBack[0]);
-        assertTrue(PAGE_TWO_URL.equals(urlAfterForward[0]), "Expected " + PAGE_TWO_URL + " after "
-                + "goForward(), got " + urlAfterForward[0]);
+        });
+        navigate.run();
+        SharedBrowserExtension.awaitLatch(done, 15);
     }
 
     @Test
-    void reloadAndVisibilityApisDoNotThrow() {
-        TestFrame frame = new TestFrame() {
-            @Override
-            protected void setupTest() {
-                addResource(PAGE_ONE_URL, "<html><body>reload test</body></html>", "text/html");
-                createBrowser(PAGE_ONE_URL, true /* useOSR */);
-                super.setupTest();
-            }
+    void backAndForwardNavigationWorks() {
+        CefBrowser browser = SharedBrowserExtension.browser();
 
-            @Override
-            public void onLoadingStateChange(CefBrowser browser, boolean isLoading,
-                    boolean canGoBack, boolean canGoForward) {
-                if (isLoading) return;
-                terminateTest();
-            }
-        };
+        String pageOneUrl = SharedBrowserExtension.loadPage("<html><body>one</body></html>");
+        String pageTwoUrl = SharedBrowserExtension.loadPage("<html><body>two</body></html>");
 
-        frame.awaitCompletion();
+        boolean couldGoBackAfterSecondLoad = browser.canGoBack();
+        boolean couldGoForwardAfterSecondLoad = browser.canGoForward();
 
-        CefBrowser browser = frame.browser_;
-        browser.setFocus(true);
+        awaitNavigation(browser::goBack);
+        String urlAfterBack = browser.getURL();
+        boolean couldGoForwardAfterBack = browser.canGoForward();
+
+        awaitNavigation(browser::goForward);
+        String urlAfterForward = browser.getURL();
+
+        assertTrue(couldGoBackAfterSecondLoad, "canGoBack() should be true after two loads");
+        assertFalse(couldGoForwardAfterSecondLoad,
+                "canGoForward() should be false before going back");
+        assertTrue(couldGoForwardAfterBack, "canGoForward() should be true after going back");
+        assertTrue(pageOneUrl.equals(urlAfterBack), "Expected " + pageOneUrl + " after "
+                + "goBack(), got " + urlAfterBack);
+        assertTrue(pageTwoUrl.equals(urlAfterForward), "Expected " + pageTwoUrl + " after "
+                + "goForward(), got " + urlAfterForward);
+    }
+
+    @Test
+    void reloadAndVisibilityApisDoNotThrow()
+            throws InterruptedException, java.lang.reflect.InvocationTargetException {
+        SharedBrowserExtension.loadPage("<html><body>reload test</body></html>");
+
+        CefBrowser browser = SharedBrowserExtension.browser();
+        // setFocus() must be EDT-consistent -- see CefFocusHandlerCoverageTest
+        // and SharedBrowserExtension's own class comment for why this isn't
+        // optional when called from the JUnit thread (unlike TestFrame's
+        // pattern, loadPage() returns control to the calling thread, not the
+        // EDT).
+        SwingUtilities.invokeAndWait(() -> browser.setFocus(true));
         browser.setWindowVisibility(true);
         browser.reload();
         browser.reloadIgnoreCache();
