@@ -63,19 +63,41 @@ import org.junit.jupiter.api.extension.ExtendWith;
 // window is a child CEF itself creates (via CefWindowX11's constructor,
 // parented to the AWT Canvas's X11 drawable JCEF passes as
 // window_info_.parent_window -- see native/jni_util_linux.cpp's
-// GetDrawableOfCanvas()), not something JCEF reparents after the fact. The
-// most likely explanation the trace is consistent with: CEF's own X11
-// connection/event source for this window is never serviced by the time the
-// process hangs -- DoMessageLoopWork() keeps calling into Chromium's real
-// message pump every ~3ms (confirmed still running via the trace), yet this
-// specific queued event is never dispatched into ProcessXEvent. Whether
-// that's an event-ownership/routing gap specific to a CEF-owned child window
-// under a foreign (AWT-owned) window hierarchy, or something else in how
-// JCEF's external-pump integration (CefSettings.external_message_pump, see
+// GetDrawableOfCanvas()), not something JCEF reparents after the fact.
+//
+// CONFIRMED live via gdb (jpype's doc/develguide.rst gdb technique -- launch
+// java directly under gdb, `handle SIGSEGV nostop noprint pass` so HotSpot's
+// own benign implicit-null-check SIGSEGVs don't spam-stop the debugger, then
+// breakpoint the CEF symbols by name; libcef.so ships with debug_info even in
+// the vendored binary, so this works without a custom CEF build) with
+// breakpoints on CefWindowX11::Close, ui::SendClientMessage,
+// CefWindowX11::ProcessXEvent, and AlloyBrowserHostImpl::WindowDestroyed/
+// DestroyBrowser: CefWindowX11::Close() and ui::SendClientMessage() both DO
+// fire (full backtrace confirms the exact call chain through
+// AlloyBrowserHostImpl::CloseContents() described above) -- but
+// ProcessXEvent, WindowDestroyed, and DestroyBrowser NEVER fire afterward, in
+// this or any later run. The message is genuinely sent; it is never
+// processed. Corroborated two ways: (1) a breakpoint on the imported
+// `xcb_flush` symbol shows dozens of hits during normal startup/paint
+// activity but zero after the close sequence begins; (2) `strace -f -e
+// trace=write,writev,sendmsg,sendto` across the whole process shows no
+// meaningful write-family syscall activity in the same window beyond routine
+// JCEF_TRACE stderr writes, all the way to the 30s watchdog. (Chromium's
+// Ozone/X11 layer partly reimplements the XCB wire protocol in C++ and may
+// not always route through libxcb's own `xcb_flush`, so neither check alone
+// is airtight -- but both point the same direction and neither shows the
+// message ever leaving the process.)
+//
+// Not yet confirmed: WHY delivery/processing never happens -- an event-
+// ownership/routing gap specific to a CEF-owned child window under a foreign
+// (AWT-owned) window hierarchy, versus something about how JCEF's
+// external-pump integration (CefSettings.external_message_pump, see
 // CefDoMessageLoopWork()'s own doc comment on its integration caveats)
-// services CEF's X11 socket between calls, is not yet confirmed -- doing so
-// would need live X11 protocol tracing (xtrace) or a gdb breakpoint in
-// CefWindowX11::ProcessXEvent, not attempted this session.
+// services CEF's X11 socket, remain both plausible and both untested further
+// -- doing so would need to patch/rebuild CEF's own X11 layer (source is
+// available at ~/devel/cef but is a large rebuild) or a from-scratch
+// reimplementation of Chromium's Ozone/X11 connection object to trace inside
+// it, neither attempted this session.
 //
 // Tried running under a real window manager (icewm on a fresh Xvfb :99,
 // matching .azure/scripts/coverage.yml's setup) in case the lack of one on
@@ -93,12 +115,13 @@ class CefBrowserWrTest {
     private static final String TEST_URL = "http://test.com/windowed.html";
 
     @Test
-    @Disabled("Windowed (non-OSR) browser close hangs indefinitely: CEF's own "
+    @Disabled("Windowed (non-OSR) browser close hangs indefinitely: gdb-confirmed, CEF's own "
             + "CefWindowX11::Close() sends itself a synthetic X11 WM_DELETE_WINDOW "
-            + "ClientMessage and waits for its own event source to process it before "
-            + "proceeding to WindowDestroyed()/OnBeforeClose -- that event is apparently "
-            + "never delivered/processed under JCEF's embedding. See the class-level "
-            + "comment for the full CEF-source-grounded investigation.")
+            + "ClientMessage (ui::SendClientMessage() fires) and waits for its own event "
+            + "source to process it before proceeding to WindowDestroyed()/OnBeforeClose -- "
+            + "that event is confirmed never delivered/processed (ProcessXEvent never fires) "
+            + "under JCEF's embedding. See the class-level comment for the full "
+            + "CEF-source-grounded, gdb-verified investigation.")
     void windowedBrowserLoadsAndReportsCorrectUrl() {
         boolean[] done = {false};
 
