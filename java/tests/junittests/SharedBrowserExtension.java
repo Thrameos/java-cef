@@ -141,9 +141,11 @@ public class SharedBrowserExtension implements BeforeAllCallback, BeforeEachCall
     private static class ResourceContent {
         final String content;
         final String mimeType;
-        ResourceContent(String content, String mimeType) {
+        final HashMap<String, String> headers;
+        ResourceContent(String content, String mimeType, HashMap<String, String> headers) {
             this.content = content;
             this.mimeType = mimeType;
+            this.headers = headers;
         }
     }
 
@@ -311,7 +313,7 @@ public class SharedBrowserExtension implements BeforeAllCallback, BeforeEachCall
                         rc = resourceMap_.get(url);
                     }
                     if (rc == null) return null;
-                    return new TestResourceHandler(rc.content, rc.mimeType, null);
+                    return new TestResourceHandler(rc.content, rc.mimeType, rc.headers);
                 }
             };
 
@@ -325,13 +327,21 @@ public class SharedBrowserExtension implements BeforeAllCallback, BeforeEachCall
     // migrated tests won't need their own load-handling boilerplate at all
     // as a result.
     public static String loadPage(String html) {
-        return loadPage(html, "text/html");
+        return loadPage(html, "text/html", null);
     }
 
-    public static synchronized String loadPage(String html, String mimeType) {
+    public static String loadPage(String html, String mimeType) {
+        return loadPage(html, mimeType, null);
+    }
+
+    // Like loadPage(html, mimeType), but also serves the given response
+    // headers (e.g. a real Set-Cookie header -- see UpstreamIssue405Test)
+    // for the same navigation.
+    public static synchronized String loadPage(
+            String html, String mimeType, HashMap<String, String> headers) {
         String url = "http://test.com/shared/" + urlCounter_.incrementAndGet() + ".html";
         synchronized (resourceMap_) {
-            resourceMap_.put(url, new ResourceContent(html, mimeType));
+            resourceMap_.put(url, new ResourceContent(html, mimeType, headers));
         }
 
         CountDownLatch loaded = new CountDownLatch(1);
@@ -444,6 +454,22 @@ public class SharedBrowserExtension implements BeforeAllCallback, BeforeEachCall
     public static void addPrintHandler(CefPrintHandler handler) {
         client_.addPrintHandler(handler);
         trackCleanup(client_::removePrintHandler);
+    }
+
+    // Unlike the other add*Handler() wrappers, a client can have multiple
+    // message routers at once, so removal needs the same instance back
+    // (CefClient.removeMessageRouter() takes it as an argument, unlike the
+    // other no-arg remove*Handler() methods) -- and, since this client
+    // persists across tests (unlike TestFrame's one-shot client, which
+    // never bothered removing its router before disposing the whole
+    // client), also needs an explicit dispose() so the router's own native
+    // resources don't outlive the test that created it.
+    public static void addMessageRouter(org.cef.browser.CefMessageRouter router) {
+        client_.addMessageRouter(router);
+        trackCleanup(() -> {
+            client_.removeMessageRouter(router);
+            router.dispose();
+        });
     }
 
     private static void trackCleanup(Runnable remover) {

@@ -16,7 +16,7 @@ import org.cef.handler.CefMessageRouterHandlerAdapter;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 
-import java.util.concurrent.TimeUnit;
+import java.util.concurrent.CountDownLatch;
 
 // Regression test for upstream chromiumembedded/java-cef#398 (and this fork's
 // Thrameos/java-cef#13): the CEF message router's "subscription" style query
@@ -29,9 +29,13 @@ import java.util.concurrent.TimeUnit;
 // through to N_Success (set on the Java-side callback object by
 // MessageRouterHandler::OnQuery() before onQuery() is invoked) and only
 // clearing the native ref when the query is not persistent.
-@ExtendWith(TestSetupExtension.class)
+//
+// Migrated to the shared-browser (Tier 1) harness -- see plan/roadmap.md's
+// "two-tier test harness" entry. router.dispose() (previously in
+// TestFrame.cleanupTest()'s override) is now a plain trackCleanup(), which
+// SharedBrowserExtension.addMessageRouter() already wires up automatically.
+@ExtendWith({TestSetupExtension.class, SharedBrowserExtension.class})
 class UpstreamIssue398Test {
-    private static final String TEST_URL = "http://test.com/upstream_issue_398.html";
     private static final String CONTENT = "<html><body><script>"
             + "window.responseCount = 0;"
             + "window.cefQuery({request: 'subscribe', persistent: true,"
@@ -48,59 +52,45 @@ class UpstreamIssue398Test {
         boolean[] gotFirstResponse = {false};
         String[] finalTitle = {null};
         boolean[] wasPersistent = {false};
+        CountDownLatch done = new CountDownLatch(1);
 
-        TestFrame frame = new TestFrame() {
-            CefMessageRouter router;
-
+        CefMessageRouter router = CefMessageRouter.create();
+        router.addHandler(new CefMessageRouterHandlerAdapter() {
             @Override
-            protected void setupTest() {
-                router = CefMessageRouter.create();
-                router.addHandler(new CefMessageRouterHandlerAdapter() {
-                    @Override
-                    public boolean onQuery(CefBrowser browser, CefFrame frame, long queryId,
-                            String request, boolean persistent, CefQueryCallback callback) {
-                        if ("subscribe".equals(request)) {
-                            wasPersistent[0] = persistent;
-                            savedCallback[0] = callback;
-                            callback.success("first");
-                            return true;
-                        }
-                        return false;
-                    }
-                }, true);
-                client_.addMessageRouter(router);
-
-                client_.addDisplayHandler(new CefDisplayHandlerAdapter() {
-                    @Override
-                    public void onTitleChange(CefBrowser browser, String newTitle) {
-                        if ("response1".equals(newTitle) && !gotFirstResponse[0]) {
-                            gotFirstResponse[0] = true;
-                            // Per the documented "subscription" workflow, this
-                            // second call should invoke the JS onSuccess
-                            // handler again.
-                            savedCallback[0].success("second");
-                        } else if ("response2".equals(newTitle)) {
-                            finalTitle[0] = newTitle;
-                            terminateTest();
-                        }
-                    }
-                });
-
-                addResource(TEST_URL, CONTENT, "text/html");
-                createBrowser(TEST_URL, true /* useOSR */);
-                super.setupTest();
+            public boolean onQuery(CefBrowser browser, CefFrame frame, long queryId, String request,
+                    boolean persistent, CefQueryCallback callback) {
+                if ("subscribe".equals(request)) {
+                    wasPersistent[0] = persistent;
+                    savedCallback[0] = callback;
+                    callback.success("first");
+                    return true;
+                }
+                return false;
             }
+        }, true);
+        SharedBrowserExtension.addMessageRouter(router);
 
+        SharedBrowserExtension.addDisplayHandler(new CefDisplayHandlerAdapter() {
             @Override
-            protected void cleanupTest() {
-                router.dispose();
-                super.cleanupTest();
+            public void onTitleChange(CefBrowser browser, String newTitle) {
+                if ("response1".equals(newTitle) && !gotFirstResponse[0]) {
+                    gotFirstResponse[0] = true;
+                    // Per the documented "subscription" workflow, this second
+                    // call should invoke the JS onSuccess handler again.
+                    savedCallback[0].success("second");
+                } else if ("response2".equals(newTitle)) {
+                    finalTitle[0] = newTitle;
+                    done.countDown();
+                }
             }
-        };
+        });
 
-        // Shorter than the 30s default -- if the bug reproduces, "response2"
+        SharedBrowserExtension.loadPage(CONTENT);
+        // Shorter than the default -- if the bug reproduces, "response2"
         // never arrives and there's no point waiting the full default.
-        frame.awaitCompletion(10, TimeUnit.SECONDS);
+        if (!"response2".equals(finalTitle[0])) {
+            SharedBrowserExtension.awaitLatch(done, 10);
+        }
 
         assertTrue(wasPersistent[0], "Query should have been sent with persistent:true");
         assertTrue(gotFirstResponse[0], "First success() call's response never arrived");

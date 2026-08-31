@@ -6,9 +6,6 @@ package tests.junittests;
 
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import org.cef.browser.CefBrowser;
-import org.cef.misc.BoolRef;
-import org.cef.network.CefCookie;
 import org.cef.network.CefCookieManager;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -37,9 +34,11 @@ import java.util.concurrent.atomic.AtomicBoolean;
 // SameSite policy interactions) that this fork's local, same-origin,
 // locally-served-response test doesn't exercise. Kept as a regression guard
 // for the case it does cover; no fork issue filed.
-@ExtendWith(TestSetupExtension.class)
+//
+// Migrated to the shared-browser (Tier 1) harness -- see plan/roadmap.md's
+// "two-tier test harness" entry.
+@ExtendWith({TestSetupExtension.class, SharedBrowserExtension.class})
 class UpstreamIssue405Test {
-    private static final String LOGIN_URL = "http://test.com/upstream_issue_405_login.html";
     private static final String COOKIE_NAME = "jcef_login_session";
     private static final String COOKIE_VALUE = "abc123";
 
@@ -48,33 +47,17 @@ class UpstreamIssue405Test {
         AtomicBoolean found = new AtomicBoolean(false);
         CountDownLatch visited = new CountDownLatch(1);
 
-        TestFrame frame = new TestFrame() {
-            @Override
-            protected void setupTest() {
-                HashMap<String, String> headers = new HashMap<>();
-                headers.put(
-                        "Set-Cookie", COOKIE_NAME + "=" + COOKIE_VALUE + "; Path=/; SameSite=Lax");
-                addResource(LOGIN_URL, "<html><body>logged in</body></html>", "text/html",
-                        headers);
-                createBrowser(LOGIN_URL, true /* useOSR */);
-                super.setupTest();
-            }
-
-            @Override
-            public void onLoadingStateChange(CefBrowser browser, boolean isLoading,
-                    boolean canGoBack, boolean canGoForward) {
-                if (!isLoading) terminateTest();
-            }
-        };
-
-        frame.awaitCompletion();
+        HashMap<String, String> headers = new HashMap<>();
+        headers.put("Set-Cookie", COOKIE_NAME + "=" + COOKIE_VALUE + "; Path=/; SameSite=Lax");
+        String loginUrl = SharedBrowserExtension.loadPage(
+                "<html><body>logged in</body></html>", "text/html", headers);
 
         // Same as the upstream report's own repro shape: query cookies
         // shortly after the navigation that set them, on a fresh call to
         // the global cookie manager (not the same objects/handles used
         // during the navigation itself).
         CefCookieManager.getGlobalManager().visitUrlCookies(
-                LOGIN_URL, false, (cookie, count, total, delete) -> {
+                loginUrl, false, (cookie, count, total, delete) -> {
                     if (COOKIE_NAME.equals(cookie.name) && COOKIE_VALUE.equals(cookie.value)) {
                         found.set(true);
                     }
@@ -83,7 +66,8 @@ class UpstreamIssue405Test {
                 });
 
         assertTrue(visited.await(10, TimeUnit.SECONDS), "Cookie visitor callback never fired");
-        assertTrue(found.get(), "Cookie set via a real Set-Cookie response header during "
-                + "navigation was not visible afterward via visitUrlCookies()");
+        assertTrue(found.get(),
+                "Cookie set via a real Set-Cookie response header during "
+                        + "navigation was not visible afterward via visitUrlCookies()");
     }
 }
