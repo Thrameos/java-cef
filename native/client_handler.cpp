@@ -233,6 +233,17 @@ void ClientHandler::RemoveMessageRouter(JNIEnv* env, jobject jmessageRouter) {
 
   CefMessageRouterConfig config = GetMessageRouterConfig(env, jmessageRouter);
 
+  // Cancel any outstanding queries before dropping the router. A
+  // *persistent* query's callback holds a CefRefPtr back to the router
+  // (see CefMessageRouterBrowserSideImpl::CallbackImpl::router_) that is
+  // only released by CancelPending()/OnBeforeClose()/OnRenderProcessTerminated()
+  // -- if the router is removed while such a query is still outstanding (as
+  // opposed to the browser actually closing, which OnBeforeClose() above
+  // already handles), nothing else ever calls it, leaking the router (and
+  // transitively the browser context it keeps alive) for the life of the
+  // process. See issue #4/#23.
+  router->CancelPending(nullptr, nullptr);
+
   // 1) Remove CefMessageRouterBrowserSide from the list.
   {
     base::AutoLock lock_scope(message_router_lock_);
