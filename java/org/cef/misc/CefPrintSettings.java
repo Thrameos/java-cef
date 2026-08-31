@@ -4,6 +4,8 @@
 
 package org.cef.misc;
 
+import org.cef.callback.Disposable;
+
 import java.awt.Dimension;
 import java.awt.Rectangle;
 import java.util.Vector;
@@ -11,7 +13,7 @@ import java.util.Vector;
 /**
  * Class representing print settings.
  */
-public abstract class CefPrintSettings {
+public abstract class CefPrintSettings implements Disposable {
     /**
      * Print job color mode values.
      */

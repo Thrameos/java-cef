@@ -12,6 +12,7 @@ import org.cef.callback.CefContextMenuParams;
 import org.cef.callback.CefDownloadItem;
 import org.cef.callback.CefDownloadItemCallback;
 import org.cef.callback.CefDragData;
+import org.cef.callback.Disposable;
 import org.cef.callback.CefFileDialogCallback;
 import org.cef.callback.CefJSDialogCallback;
 import org.cef.callback.CefMenuModel;
@@ -69,7 +70,7 @@ public class CefClient extends CefClientHandler
         implements CefContextMenuHandler, CefDialogHandler, CefDisplayHandler, CefDownloadHandler,
                    CefDragHandler, CefFocusHandler, CefJSDialogHandler, CefKeyboardHandler,
                    CefLifeSpanHandler, CefLoadHandler, CefPrintHandler, CefRenderHandler,
-                   CefRequestHandler, CefWindowHandler {
+                   CefRequestHandler, CefWindowHandler, Disposable {
     private static final Logger LOGGER = Logger.getLogger(CefClient.class.getName());
     private HashMap<Integer, CefBrowser> browser_ = new HashMap<Integer, CefBrowser>();
     private CefContextMenuHandler contextMenuHandler_ = null;

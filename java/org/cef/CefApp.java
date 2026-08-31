@@ -6,6 +6,7 @@ package org.cef;
 
 import org.cef.browser.CefRequestContext;
 import org.cef.callback.CefSchemeHandlerFactory;
+import org.cef.callback.Disposable;
 import org.cef.handler.CefAppHandler;
 import org.cef.handler.CefAppHandlerAdapter;
 import org.cef.network.CefCookieManager;
@@ -25,7 +26,7 @@ import javax.swing.Timer;
 /**
  * Exposes static methods for managing the global CEF context.
  */
-public class CefApp extends CefAppHandlerAdapter {
+public class CefApp extends CefAppHandlerAdapter implements Disposable {
     private static final Logger LOGGER = Logger.getLogger(CefApp.class.getName());
 
     public final class CefVersion {
