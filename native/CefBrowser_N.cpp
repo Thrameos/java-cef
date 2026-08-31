@@ -1523,12 +1523,21 @@ Java_org_cef_browser_CefBrowser_1N_N_1SetWindowVisibility(JNIEnv* env,
                                                           jobject obj,
                                                           jboolean visible) {
   CefRefPtr<CefBrowser> browser = JNI_GET_BROWSER_OR_RETURN(env, obj);
+  CefRefPtr<CefBrowserHost> host = browser->GetHost();
+
+  // Windowless (OSR) browsers have no native window for the OS-level
+  // visibility toggle below -- CefBrowserHost::WasHidden() is CEF's own
+  // signal for this case (used to pause/resume rendering and GPU resource
+  // usage). Previously this whole function was a no-op for every OSR browser
+  // on every platform except this one macOS branch, and even that branch had
+  // the windowless check backwards (skipped exactly when windowless).
+  if (host->IsWindowRenderingDisabled()) {
+    host->WasHidden(visible == JNI_FALSE);
+    return;
+  }
 
 #if defined(OS_MACOSX)
-  if (!browser->GetHost()->IsWindowRenderingDisabled()) {
-    util_mac::SetVisibility(browser->GetHost()->GetWindowHandle(),
-                            visible != JNI_FALSE);
-  }
+  util_mac::SetVisibility(host->GetWindowHandle(), visible != JNI_FALSE);
 #endif
 }
 JNIEXPORT jdouble JNICALL
