@@ -37,6 +37,7 @@ import org.cef.handler.CefScreenInfo;
 import org.cef.handler.CefWindowHandler;
 import org.cef.misc.BoolRef;
 import org.cef.misc.CefPrintSettings;
+import org.cef.misc.JCefTrace;
 import org.cef.misc.StringRef;
 import org.cef.network.CefRequest;
 import org.cef.network.CefRequest.TransitionType;
@@ -53,6 +54,7 @@ import java.awt.Rectangle;
 import java.beans.PropertyChangeEvent;
 import java.beans.PropertyChangeListener;
 import java.nio.ByteBuffer;
+import java.util.ArrayList;
 import java.util.Collection;
 import java.util.HashMap;
 import java.util.Vector;
@@ -82,6 +84,17 @@ public class CefClient extends CefClientHandler
     private CefPrintHandler printHandler_ = null;
     private CefRequestHandler requestHandler_ = null;
     private boolean isDisposed_ = false;
+    // See cleanupBrowser()'s own comment: guards its handler-removal +
+    // super.dispose() block against running more than once. isDisposed_
+    // alone doesn't work as that guard -- it's set true and never reset, so
+    // cleanupBrowser() being invoked again afterward (e.g. a second/late
+    // onBeforeClose() callback while browser_ is already empty) would
+    // re-enter and re-run the whole block, double-removing every handler --
+    // see Thrameos/java-cef#22 (SetCefForJNIObjectHelper::Release SIGSEGV,
+    // confirmed live this session via native/jcef_trace.h's varName-tagged
+    // ref trace: the exact same CefFocusHandler native pointer released
+    // twice, ~83ms apart, with no intervening AddRef).
+    private boolean handlersRemoved_ = false;
     private volatile CefBrowser focusedBrowser_ = null;
     private final PropertyChangeListener propertyChangeListener = new PropertyChangeListener() {
         @Override
@@ -577,49 +590,83 @@ public class CefClient extends CefClientHandler
     @Override
     public void onBeforeClose(CefBrowser browser) {
         if (browser == null) return;
+        JCefTrace.trace("CefClient.onBeforeClose() ENTER browser_id=%d",
+                browser.getIdentifier());
         if (lifeSpanHandler_ != null) lifeSpanHandler_.onBeforeClose(browser);
         browser.onBeforeClose();
 
         // remove browser reference
         cleanupBrowser(browser.getIdentifier());
+        JCefTrace.trace("CefClient.onBeforeClose() EXIT browser_id=%d",
+                browser.getIdentifier());
     }
 
     private void cleanupBrowser(int identifier) {
+        JCefTrace.trace("CefClient.cleanupBrowser(%d) ENTER", identifier);
         synchronized (browser_) {
             if (identifier >= 0) {
                 // Remove the specific browser that closed.
                 browser_.remove(identifier);
             } else if (!browser_.isEmpty()) {
-                // Close all browsers.
-                Collection<CefBrowser> browserList = browser_.values();
+                // Close all browsers. Snapshot before iterating: browser.close(true)
+                // synchronously triggers onBeforeClose() -> cleanupBrowser(identifier)
+                // -> browser_.remove(identifier), which would otherwise mutate
+                // browser_.values() while this loop is still iterating it
+                // (ConcurrentModificationException, timing-dependent on when CEF's
+                // callback fires relative to the loop).
+                Collection<CefBrowser> browserList = new ArrayList<>(browser_.values());
                 for (CefBrowser browser : browserList) {
                     browser.close(true);
                 }
+                JCefTrace.trace("CefClient.cleanupBrowser(%d) EXIT (closed all)", identifier);
                 return;
             }
 
-            if (browser_.isEmpty() && isDisposed_) {
+            if (browser_.isEmpty() && isDisposed_ && !handlersRemoved_) {
+                // See handlersRemoved_'s own field comment -- this guard is the
+                // actual fix for issue #22's confirmed double-release. Each
+                // remove*Handler() call below is still traced individually so a
+                // future crash in here pinpoints exactly which handler removal
+                // it was inside of.
+                handlersRemoved_ = true;
                 KeyboardFocusManager.getCurrentKeyboardFocusManager().removePropertyChangeListener(
                         propertyChangeListener);
+                JCefTrace.trace("cleanupBrowser: removeContextMenuHandler CALL");
                 removeContextMenuHandler(this);
+                JCefTrace.trace("cleanupBrowser: removeDialogHandler CALL");
                 removeDialogHandler(this);
+                JCefTrace.trace("cleanupBrowser: removeDisplayHandler CALL");
                 removeDisplayHandler(this);
+                JCefTrace.trace("cleanupBrowser: removeDownloadHandler CALL");
                 removeDownloadHandler(this);
+                JCefTrace.trace("cleanupBrowser: removeDragHandler CALL");
                 removeDragHandler(this);
+                JCefTrace.trace("cleanupBrowser: removeFocusHandler CALL");
                 removeFocusHandler(this);
+                JCefTrace.trace("cleanupBrowser: removeJSDialogHandler CALL");
                 removeJSDialogHandler(this);
+                JCefTrace.trace("cleanupBrowser: removeKeyboardHandler CALL");
                 removeKeyboardHandler(this);
+                JCefTrace.trace("cleanupBrowser: removeLifeSpanHandler CALL");
                 removeLifeSpanHandler(this);
+                JCefTrace.trace("cleanupBrowser: removeLoadHandler CALL");
                 removeLoadHandler(this);
+                JCefTrace.trace("cleanupBrowser: removePrintHandler CALL");
                 removePrintHandler(this);
+                JCefTrace.trace("cleanupBrowser: removeRenderHandler CALL");
                 removeRenderHandler(this);
+                JCefTrace.trace("cleanupBrowser: removeRequestHandler CALL");
                 removeRequestHandler(this);
+                JCefTrace.trace("cleanupBrowser: removeWindowHandler CALL");
                 removeWindowHandler(this);
+                JCefTrace.trace("cleanupBrowser: all remove*Handler calls done, "
+                        + "calling super.dispose()");
                 super.dispose();
 
                 CefApp.getInstance().clientWasDisposed(this);
             }
         }
+        JCefTrace.trace("CefClient.cleanupBrowser(%d) EXIT", identifier);
     }
 
     // CefLoadHandler
