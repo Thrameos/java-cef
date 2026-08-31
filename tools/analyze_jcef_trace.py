@@ -13,16 +13,23 @@ to flag two classes of bug mechanically instead of hand-reading the log:
   - leaked-reference-shaped events: a pointer with an outstanding positive
     refcount (more acquires than releases) when the trace ends.
 
-Three ref kinds are tracked, each independently (see jni_scoped_helpers.h/.cpp
+Four ref kinds are tracked, each independently (see jni_scoped_helpers.h/.cpp
 for the call sites): CEF_ADDREF/CEF_RELEASE (CefBaseRefCounted refcounting),
-JNI_GREF_NEW/JNI_GREF_DEL (JNI global references), and JNI_LREF_DEL only (no
-JNI_LREF_NEW exists -- local ref *creation* is scattered across ~15 call
-sites, not traced; only deletion, from ScopedJNIBase's single destructor
-choke point, is). For JNI_LREF_DEL, "use-after-free" instead means: the exact
-same pointer value was DeleteLocalRef'd twice with no other trace event for
-that pointer in between -- a heuristic (JVMs do reuse local ref slots, so
-this alone isn't proof), flagged as a candidate for manual review, not a
-certain bug.
+JNI_GREF_NEW/JNI_GREF_DEL (JNI global references), and JNI_LREF_NEW/
+JNI_LREF_DEL (local refs owned by a ScopedJNIBase-derived type -- every
+acquisition site calls the shared TraceAcquired() helper, and every release
+goes through ~ScopedJNIBase()'s single destructor choke point, so this pair
+is pair-matched by pointer exactly like the other two, not just a same-
+pointer-twice heuristic). A same-pointer double-DEL with no matching NEW in
+between is a real double-DeleteLocalRef -- local ref slot addresses ARE
+legitimately reused across separate acquisitions once freed, which is
+exactly why the old heuristic-only version of this check was noisy; proper
+NEW/DEL pairing removes that ambiguity.
+
+The separate analyze_local_ref_deletes() heuristic below (same-pointer-DEL-
+twice-in-a-row) is now redundant with the JNI_LREF_NEW/DEL pair above and
+kept only as a secondary cross-check in case some acquisition site is ever
+added without going through TraceAcquired().
 
 IMPORTANT CAVEAT: if the traced run crashed (rather than exiting normally),
 outstanding "leaked" refs at end-of-trace are expected (the process died
@@ -56,6 +63,7 @@ CRASH_MARKERS = (
 PAIRS = [
     ("CEF_ADDREF", "CEF_RELEASE", "CEF ref-counted object (AddRef/Release)"),
     ("JNI_GREF_NEW", "JNI_GREF_DEL", "JNI global reference"),
+    ("JNI_LREF_NEW", "JNI_LREF_DEL", "JNI local reference (ScopedJNIBase-owned)"),
 ]
 
 

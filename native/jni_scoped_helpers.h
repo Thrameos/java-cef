@@ -564,14 +564,36 @@ class ScopedJNIBase {
   // Implicit cast works in most cases.
   operator T() const { return jhandle_; }
 
-  // Returns and disassociates from the underlying handle.
+  // Returns and disassociates from the underlying handle. The caller takes
+  // over ownership (e.g. returning it as a JNI method's own return value,
+  // relying on the JVM's automatic per-call local-ref-frame cleanup instead
+  // of an explicit DeleteLocalRef) -- trace it as a release from THIS
+  // wrapper's point of view even though the underlying ref isn't actually
+  // deleted here, so tools/analyze_jcef_trace.py's NEW/DEL pairing doesn't
+  // misreport every Release()'d ref as a leak.
   T Release() {
     T temp = jhandle_;
+    if (temp && delete_ref_) {
+      JCEF_TRACE("REF kind=JNI_LREF_DEL ptr=%p (via Release())", (void*)temp);
+    }
     jhandle_ = nullptr;
     return temp;
   }
 
  protected:
+  // Call once, right after jhandle_ is assigned a (possibly null) value, in
+  // every derived-class constructor/setter that acquires a local ref this
+  // object will own -- pairs with the JNI_LREF_DEL trace in ~ScopedJNIBase()
+  // below, letting tools/analyze_jcef_trace.py pair-match acquire/release by
+  // pointer instead of only flagging same-pointer-twice heuristically (local
+  // ref slots are legitimately reused across calls, which made that
+  // heuristic noisy -- see the analyzer's own docstring).
+  void TraceAcquired() const {
+    if (jhandle_ && delete_ref_) {
+      JCEF_TRACE("REF kind=JNI_LREF_NEW ptr=%p", (void*)jhandle_);
+    }
+  }
+
   JNIEnv* const env_;
   T jhandle_;
   bool delete_ref_;
@@ -597,6 +619,7 @@ class ScopedJNIObjectResult : public ScopedJNIBase<jobject> {
   jobject& operator=(const jobject& obj) {
     DCHECK(!jhandle_);
     jhandle_ = obj;
+    TraceAcquired();
     return jhandle_;
   }
 };
@@ -618,6 +641,7 @@ class ScopedJNIObject : public ScopedJNIBase<jobject> {
         created_handle_(false) {
     DCHECK(handle);
     jhandle_ = handle;
+    TraceAcquired();
   }
 
   // Create a new JNI object handle that attaches to an existing CEF object. A
@@ -650,6 +674,7 @@ class ScopedJNIObject : public ScopedJNIBase<jobject> {
       jhandle_ = NewJNIObject(env_, jni_class_name);
       if (jhandle_) {
         created_handle_ = true;
+        TraceAcquired();
         SetCefForJNIObjectImpl(SetCefForJNIObjectHelper::Get(obj), cef_class_name);
       }
     }
@@ -669,6 +694,7 @@ class ScopedJNIObject : public ScopedJNIBase<jobject> {
     DCHECK(handle);
     jhandle_ = handle;
     delete_ref_ = should_delete;
+    TraceAcquired();
   }
 
   // Invalidate the Java object on destruction.
@@ -799,6 +825,7 @@ class ScopedJNIStringResult : public ScopedJNIBase<jstring> {
   jstring& operator=(const jstring& str) {
     DCHECK(!jhandle_);
     jhandle_ = str;
+    TraceAcquired();
     return jhandle_;
   }
 

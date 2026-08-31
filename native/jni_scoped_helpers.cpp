@@ -286,6 +286,7 @@ ScopedJNIObjectGlobal::operator jobject() const {
 ScopedJNIObjectLocal::ScopedJNIObjectLocal(JNIEnv* env, jobject handle)
     : ScopedJNIBase<jobject>(env) {
   jhandle_ = handle;
+  TraceAcquired();
 }
 
 ScopedJNIObjectLocal::ScopedJNIObjectLocal(JNIEnv* env, const char* class_name)
@@ -300,24 +301,28 @@ ScopedJNIClass::ScopedJNIClass(JNIEnv* env, const char* class_name)
 ScopedJNIClass::ScopedJNIClass(JNIEnv* env, const jclass& cls)
     : ScopedJNIBase<jclass>(env) {
   jhandle_ = cls;
+  TraceAcquired();
 }
 
 ScopedJNIString::ScopedJNIString(JNIEnv* env, const CefString& str)
     : ScopedJNIBase<jstring>(env) {
   jhandle_ = NewJNIString(env, str);
   DCHECK(jhandle_);
+  TraceAcquired();
 }
 
 ScopedJNIDate::ScopedJNIDate(JNIEnv* env, const CefBaseTime& time)
     : ScopedJNIBase<jobject>(env) {
   jhandle_ = NewJNIDate(env, time);
   DCHECK(jhandle_);
+  TraceAcquired();
 }
 
 ScopedJNICookie::ScopedJNICookie(JNIEnv* env, const CefCookie& cookie)
     : ScopedJNIBase<jobject>(env) {
   jhandle_ = NewJNICookie(env, cookie);
   DCHECK(jhandle_);
+  TraceAcquired();
 }
 
 ScopedJNITransitionType::ScopedJNITransitionType(
@@ -326,6 +331,7 @@ ScopedJNITransitionType::ScopedJNITransitionType(
     : ScopedJNIBase<jobject>(env) {
   jhandle_ = NewJNITransitionType(env, transitionType);
   DCHECK(jhandle_);
+  TraceAcquired();
 }
 
 ScopedJNIURLRequestStatus::ScopedJNIURLRequestStatus(
@@ -334,6 +340,7 @@ ScopedJNIURLRequestStatus::ScopedJNIURLRequestStatus(
     : ScopedJNIBase<jobject>(env) {
   jhandle_ = NewJNIURLRequestStatus(env, status);
   DCHECK(jhandle_);
+  TraceAcquired();
 }
 
 ScopedJNIStringResult::ScopedJNIStringResult(JNIEnv* env)
@@ -342,6 +349,7 @@ ScopedJNIStringResult::ScopedJNIStringResult(JNIEnv* env)
 ScopedJNIStringResult::ScopedJNIStringResult(JNIEnv* env, const jstring& str)
     : ScopedJNIStringResult(env) {
   jhandle_ = str;
+  TraceAcquired();
 }
 
 CefString ScopedJNIStringResult::GetCefString() const {
@@ -355,6 +363,7 @@ ScopedJNIBrowser::ScopedJNIBrowser(JNIEnv* env, CefRefPtr<CefBrowser> obj)
   if (obj) {
     // Will return nullptr for browsers that represent native popup windows.
     jhandle_ = GetJNIBrowser(env_, obj);
+    TraceAcquired();
   } else {
     jhandle_ = nullptr;
   }
@@ -365,6 +374,7 @@ void ScopedJNIBrowser::SetHandle(jobject handle, bool should_delete) {
   DCHECK(handle);
   jhandle_ = handle;
   delete_ref_ = should_delete;
+  TraceAcquired();
 }
 
 CefRefPtr<CefBrowser> ScopedJNIBrowser::GetCefObject() const {
@@ -467,6 +477,7 @@ ScopedJNIBoolRef::ScopedJNIBoolRef(JNIEnv* env, bool value)
     : ScopedJNIBase<jobject>(env) {
   jhandle_ = NewJNIBoolRef(env, value);
   DCHECK(jhandle_);
+  TraceAcquired();
 }
 
 ScopedJNIBoolRef::operator bool() const {
@@ -477,6 +488,7 @@ ScopedJNIIntRef::ScopedJNIIntRef(JNIEnv* env, int value)
     : ScopedJNIBase<jobject>(env) {
   jhandle_ = NewJNIIntRef(env, value);
   DCHECK(jhandle_);
+  TraceAcquired();
 }
 
 ScopedJNIIntRef::operator int() const {
@@ -487,6 +499,7 @@ ScopedJNILongRef::ScopedJNILongRef(JNIEnv* env, int64_t value)
     : ScopedJNIBase<jobject>(env) {
   jhandle_ = NewJNILongRef(env, value);
   DCHECK(jhandle_);
+  TraceAcquired();
 }
 
 ScopedJNILongRef::operator int64_t() const {
@@ -497,6 +510,7 @@ ScopedJNIStringRef::ScopedJNIStringRef(JNIEnv* env, const CefString& value)
     : ScopedJNIBase<jobject>(env) {
   jhandle_ = NewJNIStringRef(env, value);
   DCHECK(jhandle_);
+  TraceAcquired();
 }
 
 ScopedJNIStringRef::operator CefString() const {
