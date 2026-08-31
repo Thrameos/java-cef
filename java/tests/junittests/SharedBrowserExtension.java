@@ -125,6 +125,87 @@ public class SharedBrowserExtension implements BeforeAllCallback, BeforeEachCall
     // cross-thread race).
     private static volatile CountDownLatch pendingLoadLatch_;
 
+    // The URL loadPage()/navigateTo() is actually waiting on, set right
+    // before calling browser_.loadURL(). Three approaches were tried here,
+    // in order, each rejected by a real reproduction before landing on this
+    // one -- see issue_4_23_mental_model / shared_browser_test_harness
+    // memory for the full investigation (UpstreamIssue398Test and
+    // CefBrowserNavigationHistoryTest's flakes):
+    //   1. Just count down on the next onLoadingStateChange(false), no
+    //      correlation at all -- a belated/stale event from the PREVIOUS
+    //      test's page (still settling async work) can satisfy a
+    //      freshly-set latch before THIS navigation has even started.
+    //   2. Compare browser.getURL() at the moment of the event -- rejected,
+    //      not reliably in sync with onLoadingStateChange (delivered via
+    //      CefDisplayHandler's onAddressChange, a separate native dispatch
+    //      with no ordering guarantee relative to CefLoadHandler's own
+    //      callbacks; failed even on the very first-ever navigation).
+    //   3. "Arm" on isLoading=true, only honor a subsequent isLoading=false
+    //      once armed -- rejected too: two loadPage() calls back-to-back
+    //      can have CEF abort trailing resource activity (e.g. a favicon
+    //      fetch) for the FIRST page as the SECOND navigation starts,
+    //      without the browser's isLoading flag ever dropping back to
+    //      false in between -- so the second navigation gets no discrete
+    //      true edge to arm against at all.
+    // What actually works: onLoadStart's frame.getURL() reliably reflects
+    // the TARGET url being navigated to (confirmed empirically), so arm on
+    // a main-frame onLoadStart matching this field, and count down on the
+    // NEXT main-frame onLoadEnd or onLoadError once armed (either is a
+    // valid "this navigation is done" signal -- onLoadError also lets
+    // navigateTo() work for LoadErrorTest/UpstreamIssue365Test's
+    // deliberately-failing navigations).
+    private static volatile String pendingLoadUrl_;
+    private static volatile boolean pendingLoadArmed_;
+
+    // Always-on, bounded ring buffer of every event the harness's permanent
+    // internal handlers observe (load state/start/end/error, resource
+    // lookups) -- cheap enough to leave on unconditionally, and exactly the
+    // kind of visibility a flake investigation otherwise has to bolt on by
+    // hand each time (see the UpstreamIssue398Test/CefBrowserNavigationHistoryTest
+    // flake investigations this was built for). Dumped automatically by
+    // awaitLatch()/loadPage()/navigateTo() on timeout via dumpDiagnostics()
+    // -- a timeout failure message should never need a follow-up debugging
+    // session just to see what else was happening on the shared browser at
+    // the time.
+    private static final int EVENT_LOG_CAPACITY = 100;
+    private static final List<String> eventLog_ = new ArrayList<>();
+
+    private static void logEvent(String fmt, Object... args) {
+        String entry = System.currentTimeMillis() + " " + String.format(fmt, args);
+        synchronized (eventLog_) {
+            eventLog_.add(entry);
+            if (eventLog_.size() > EVENT_LOG_CAPACITY) eventLog_.remove(0);
+        }
+    }
+
+    // Human-readable snapshot of harness state -- appended to timeout
+    // failure messages so a flake shows its own recent history (including
+    // events that arrived for a DIFFERENT test's page/navigation, e.g. a
+    // belated title/load-state change) without needing ad hoc
+    // instrumentation added and removed by hand each time.
+    private static String dumpDiagnostics() {
+        StringBuilder sb = new StringBuilder();
+        sb.append("\n--- SharedBrowserExtension diagnostics ---\n");
+        sb.append("pendingLoadUrl_=").append(pendingLoadUrl_)
+                .append(" pendingLoadArmed_=").append(pendingLoadArmed_)
+                .append(" pendingLoadLatch_=").append(pendingLoadLatch_ != null ? "set" : "null")
+                .append(" userLoadHandler_=").append(userLoadHandler_ != null)
+                .append(" userRequestHandler_=").append(userRequestHandler_ != null)
+                .append(" browser.getURL()=")
+                .append(browser_ != null ? browser_.getURL() : "n/a")
+                .append(" browser.isLoading()=")
+                .append(browser_ != null ? browser_.isLoading() : "n/a")
+                .append('\n');
+        sb.append("recent events (oldest first):\n");
+        synchronized (eventLog_) {
+            for (String entry : eventLog_) {
+                sb.append("  ").append(entry).append('\n');
+            }
+        }
+        sb.append("--- end diagnostics ---");
+        return sb.toString();
+    }
+
     // Optional test-registered CefLoadHandler, forwarded every event by the
     // permanent internal handler below -- lets a test observe onLoadStart/
     // onLoadEnd/onLoadError/etc. (e.g. LoadErrorTest) without taking over
@@ -238,10 +319,7 @@ public class SharedBrowserExtension implements BeforeAllCallback, BeforeEachCall
             @Override
             public void onLoadingStateChange(CefBrowser browser, boolean isLoading,
                     boolean canGoBack, boolean canGoForward) {
-                if (!isLoading) {
-                    CountDownLatch latch = pendingLoadLatch_;
-                    if (latch != null) latch.countDown();
-                }
+                logEvent("onLoadingStateChange(isLoading=%s) url=%s", isLoading, browser.getURL());
                 CefLoadHandler delegate = userLoadHandler_;
                 if (delegate != null) {
                     delegate.onLoadingStateChange(browser, isLoading, canGoBack, canGoForward);
@@ -251,12 +329,25 @@ public class SharedBrowserExtension implements BeforeAllCallback, BeforeEachCall
             @Override
             public void onLoadStart(CefBrowser browser, CefFrame frame,
                     org.cef.network.CefRequest.TransitionType type) {
+                logEvent("onLoadStart frame.isMain=%s frame.getURL()=%s armed=%s latchPending=%s",
+                        frame.isMain(), frame.getURL(), pendingLoadArmed_,
+                        pendingLoadLatch_ != null);
+                if (frame.isMain() && pendingLoadLatch_ != null
+                        && frame.getURL().equals(pendingLoadUrl_)) {
+                    pendingLoadArmed_ = true;
+                }
                 CefLoadHandler delegate = userLoadHandler_;
                 if (delegate != null) delegate.onLoadStart(browser, frame, type);
             }
 
             @Override
             public void onLoadEnd(CefBrowser browser, CefFrame frame, int httpStatusCode) {
+                logEvent("onLoadEnd frame.isMain=%s frame.getURL()=%s status=%d", frame.isMain(),
+                        frame.getURL(), httpStatusCode);
+                if (frame.isMain()) {
+                    CountDownLatch latch = pendingLoadLatch_;
+                    if (latch != null && pendingLoadArmed_) latch.countDown();
+                }
                 CefLoadHandler delegate = userLoadHandler_;
                 if (delegate != null) delegate.onLoadEnd(browser, frame, httpStatusCode);
             }
@@ -264,6 +355,20 @@ public class SharedBrowserExtension implements BeforeAllCallback, BeforeEachCall
             @Override
             public void onLoadError(CefBrowser browser, CefFrame frame,
                     CefLoadHandler.ErrorCode errorCode, String errorText, String failedUrl) {
+                logEvent("onLoadError frame.isMain=%s failedUrl=%s errorCode=%s", frame.isMain(),
+                        failedUrl, errorCode);
+                // Unlike onLoadEnd, onLoadError carries the failed URL
+                // directly -- some failures (e.g. an early DNS-style
+                // resolution failure for a registered-but-unhandled
+                // resource, see LoadErrorTest/UpstreamIssue365Test) never
+                // reach onLoadStart at all, so this can't rely on
+                // pendingLoadArmed_ alone the way onLoadEnd does.
+                if (frame.isMain()) {
+                    CountDownLatch latch = pendingLoadLatch_;
+                    if (latch != null && (pendingLoadArmed_ || failedUrl.equals(pendingLoadUrl_))) {
+                        latch.countDown();
+                    }
+                }
                 CefLoadHandler delegate = userLoadHandler_;
                 if (delegate != null) {
                     delegate.onLoadError(browser, frame, errorCode, errorText, failedUrl);
@@ -331,6 +436,27 @@ public class SharedBrowserExtension implements BeforeAllCallback, BeforeEachCall
             }
         });
 
+        // createBrowser() triggers an implicit, asynchronous initial
+        // navigation to "about:blank" -- arm for it explicitly BEFORE
+        // calling createBrowser(), the same way loadPage()/navigateTo() arm
+        // for their own navigations, so the warmup load below only fires
+        // once that initial navigation has genuinely completed. Skipping
+        // this wait (calling loadPage() for the warmup immediately after
+        // createBrowser(), as an earlier version of this method did) races
+        // the browser's own native peer readiness: the warmup's loadURL()
+        // call can be issued before the browser is actually ready to accept
+        // a new navigation and gets silently lost, which the OLD, looser
+        // onLoadingStateChange-based completion check masked (it counted
+        // down on ANY isLoading edge, including about:blank's own,
+        // regardless of whether it was really the warmup navigation) --
+        // this explicit wait plus the onLoadStart-correlated completion
+        // check (see pendingLoadUrl_'s comment) surfaced the race for real
+        // instead of accidentally tolerating it.
+        CountDownLatch initialLoad = new CountDownLatch(1);
+        pendingLoadArmed_ = false;
+        pendingLoadUrl_ = "about:blank";
+        pendingLoadLatch_ = initialLoad;
+
         browser_ =
                 client_.createBrowser("about:blank", true /* useOSR */, false /* isTransparent */);
         assertNotNull(browser_);
@@ -343,6 +469,19 @@ public class SharedBrowserExtension implements BeforeAllCallback, BeforeEachCall
         frame.pack();
         frame.setSize(800, 600);
         frame.setVisible(true);
+
+        try {
+            if (!initialLoad.await(30, TimeUnit.SECONDS)) {
+                fail("SharedBrowserExtension: initial about:blank navigation never finished"
+                        + dumpDiagnostics());
+            }
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            fail("Interrupted while awaiting the initial browser navigation");
+        } finally {
+            pendingLoadLatch_ = null;
+            pendingLoadUrl_ = null;
+        }
 
         // Warm up the shared browser with one real page load before any
         // test runs -- mirrors TestSetupExtension.warmUpBrowserProcess()'s
@@ -402,17 +541,21 @@ public class SharedBrowserExtension implements BeforeAllCallback, BeforeEachCall
         }
 
         CountDownLatch loaded = new CountDownLatch(1);
+        pendingLoadArmed_ = false;
+        pendingLoadUrl_ = url;
         pendingLoadLatch_ = loaded;
         try {
             browser_.loadURL(url);
             if (!loaded.await(30, TimeUnit.SECONDS)) {
-                fail("SharedBrowserExtension.loadPage: page never finished loading: " + url);
+                fail("SharedBrowserExtension.loadPage: page never finished loading: " + url
+                        + dumpDiagnostics());
             }
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
             fail("Interrupted while awaiting page load");
         } finally {
             pendingLoadLatch_ = null;
+            pendingLoadUrl_ = null;
         }
         return url;
     }
@@ -423,17 +566,21 @@ public class SharedBrowserExtension implements BeforeAllCallback, BeforeEachCall
     // loadPage(), without registering any content for it.
     public static synchronized void navigateTo(String url) {
         CountDownLatch loaded = new CountDownLatch(1);
+        pendingLoadArmed_ = false;
+        pendingLoadUrl_ = url;
         pendingLoadLatch_ = loaded;
         try {
             browser_.loadURL(url);
             if (!loaded.await(30, TimeUnit.SECONDS)) {
-                fail("SharedBrowserExtension.navigateTo: navigation never finished: " + url);
+                fail("SharedBrowserExtension.navigateTo: navigation never finished: " + url
+                        + dumpDiagnostics());
             }
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
             fail("Interrupted while awaiting navigation");
         } finally {
             pendingLoadLatch_ = null;
+            pendingLoadUrl_ = null;
         }
     }
 
@@ -463,7 +610,8 @@ public class SharedBrowserExtension implements BeforeAllCallback, BeforeEachCall
     public static void awaitLatch(CountDownLatch latch, long timeoutSeconds) {
         try {
             if (!latch.await(timeoutSeconds, TimeUnit.SECONDS)) {
-                fail("SharedBrowserExtension.awaitLatch: timed out after " + timeoutSeconds + "s");
+                fail("SharedBrowserExtension.awaitLatch: timed out after " + timeoutSeconds + "s"
+                        + dumpDiagnostics());
             }
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();

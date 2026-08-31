@@ -36,14 +36,39 @@ import java.util.concurrent.CountDownLatch;
 // SharedBrowserExtension.addMessageRouter() already wires up automatically.
 @ExtendWith({TestSetupExtension.class, SharedBrowserExtension.class})
 class UpstreamIssue398Test {
+    // window.cefQuery is injected into a page's V8 context asynchronously,
+    // via an IPC message from the browser process sent when
+    // CefClient.addMessageRouter() is called (see
+    // ClientHandler::AddMessageRouter(), native/client_handler.cpp). On a
+    // fresh browser (TestFrame's model: router added before the browser --
+    // and its renderer process -- even exists) that IPC has nowhere to lose
+    // a race. On SharedBrowserExtension's model, the router is added to an
+    // ALREADY-RUNNING browser/renderer, immediately followed by a
+    // navigation to a brand new page/V8 context (loadPage()) -- a real,
+    // reproducible race where the new context can be created before that
+    // IPC lands, leaving window.cefQuery undefined when this script's
+    // top-level code runs (silently, since nothing here originally caught
+    // the resulting ReferenceError). Confirmed via diagnostic logging:
+    // the router's own onQuery() never fired at all in the failing case,
+    // not merely a lost response. Fixed at the correct layer -- the same
+    // way a real application would have to defend against this same race
+    // -- by polling for window.cefQuery to exist before calling it, rather
+    // than adding a fragile sleep to the Java harness side.
     private static final String CONTENT = "<html><body><script>"
             + "window.responseCount = 0;"
-            + "window.cefQuery({request: 'subscribe', persistent: true,"
-            + " onSuccess: function(response) {"
-            + "   window.responseCount++;"
-            + "   document.title = 'response' + window.responseCount;"
-            + " },"
-            + " onFailure: function(code, msg) { document.title = 'FAIL:' + code; }});"
+            + "function trySubscribe() {"
+            + "  if (typeof window.cefQuery !== 'function') {"
+            + "    setTimeout(trySubscribe, 10);"
+            + "    return;"
+            + "  }"
+            + "  window.cefQuery({request: 'subscribe', persistent: true,"
+            + "    onSuccess: function(response) {"
+            + "      window.responseCount++;"
+            + "      document.title = 'response' + window.responseCount;"
+            + "    },"
+            + "    onFailure: function(code, msg) { document.title = 'FAIL:' + code; }});"
+            + "}"
+            + "trySubscribe();"
             + "</script></body></html>";
 
     @Test
