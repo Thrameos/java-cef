@@ -48,6 +48,7 @@ Thumbs.db
 /jcef_build_coverage
 /jcef_build_asan
 /jcef_build_llvmcov
+/jcef_build_trace
 /out
 # JCEF generated files
 /native/jcef_version.h
