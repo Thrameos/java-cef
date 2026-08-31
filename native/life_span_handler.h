@@ -9,6 +9,7 @@
 #include <jni.h>
 
 #include <list>
+#include <set>
 
 #include "include/cef_life_span_handler.h"
 

@@ -99,29 +99,41 @@ import org.junit.jupiter.api.extension.ExtendWith;
 // reimplementation of Chromium's Ozone/X11 connection object to trace inside
 // it, neither attempted this session.
 //
-// Tried running under a real window manager (icewm on a fresh Xvfb :99,
-// matching .azure/scripts/coverage.yml's setup) in case the lack of one on
-// this sandbox's default DISPLAY was the cause -- no difference. Left
-// disabled rather than fully fixed (fixing it means either patching CEF's own
-// X11 event handling/JCEF's pump integration, or working around it entirely
-// e.g. by driving CloseHostWindow()'s underlying XDestroyWindow ourselves) per
-// the standing "port tests, disable failures with a note, move on" strategy
-// (plan/roadmap.md) -- importantly, this isn't just this one test failing: if
-// left enabled, the hang blocks the entire suite's shutdown
-// (TestSetupExtension.close() is a one-time, suite-global teardown), so
-// keeping this disabled is a correctness requirement, not just convenience.
+// FIXED 2026-08-31: native/util_linux.cpp's DestroyCefBrowser() now schedules
+// a bounded (2s) fallback via CefPostDelayedTask -- if CEF's own real
+// OnBeforeClose() hasn't arrived by then, JCEF calls the exact same public
+// CefLifeSpanHandler::OnBeforeClose() entry point CEF itself would have
+// called, satisfying the downstream JNI contract Java code expects (the
+// underlying native browser object is left alone; if CEF's real close does
+// complete later -- confirmed it usually does, once CefShutdown()'s own
+// heavier teardown runs, see below -- LifeSpanHandler::OnBeforeClose()'s own
+// idempotency guard, g_closed_browser_ids in life_span_handler.cpp, makes
+// that late call a no-op). Verified live: onBeforeClose/cleanupTest/suite
+// teardown all now complete correctly instead of hanging forever.
+//
+// Still @Disabled, but for an entirely different, pre-existing, already-
+// tracked reason unrelated to windowed mode: this test's own suite-global
+// teardown (TestSetupExtension.close() -> CefApp.dispose() -> CefShutdown())
+// now reaches the already-documented issue #4/#23 "DCHECK failed:
+// all_.empty()" crash (cef/libcef/browser/browser_context.cc:44) -- verified
+// this crash is NOT caused by this fix or by windowed mode at all: two plain
+// OSR tests run together (no windowed browser anywhere) hit the identical
+// crash. It was never reachable by this test before only because the
+// windowed-close hang always blocked forever first.
+//
+// Re-enable once issue #4/#23 itself is fixed (see plan/roadmap.md's
+// "MENTAL MODEL" section and java_cef_coverage_measurement_broken memory) --
+// unrelated future work, not blocked on anything from this investigation.
 @ExtendWith(TestSetupExtension.class)
 class CefBrowserWrTest {
     private static final String TEST_URL = "http://test.com/windowed.html";
 
     @Test
-    @Disabled("Windowed (non-OSR) browser close hangs indefinitely: gdb-confirmed, CEF's own "
-            + "CefWindowX11::Close() sends itself a synthetic X11 WM_DELETE_WINDOW "
-            + "ClientMessage (ui::SendClientMessage() fires) and waits for its own event "
-            + "source to process it before proceeding to WindowDestroyed()/OnBeforeClose -- "
-            + "that event is confirmed never delivered/processed (ProcessXEvent never fires) "
-            + "under JCEF's embedding. See the class-level comment for the full "
-            + "CEF-source-grounded, gdb-verified investigation.")
+    @Disabled("Windowed close itself is now fixed (see class comment) -- this test still can't "
+            + "run because the suite-global teardown that follows hits the pre-existing, "
+            + "unrelated issue #4/#23 shutdown DCHECK (verified: reproduces with plain OSR "
+            + "tests alone too, nothing to do with windowed mode). Re-enable once #4/#23 is "
+            + "fixed.")
     void windowedBrowserLoadsAndReportsCorrectUrl() {
         boolean[] done = {false};
 

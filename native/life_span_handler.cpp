@@ -4,10 +4,29 @@
 
 #include "life_span_handler.h"
 
+#include <set>
+
 #include "client_handler.h"
 #include "jcef_trace.h"
 #include "jni_util.h"
 #include "util.h"
+
+namespace {
+
+// Idempotency guard for LifeSpanHandler::OnBeforeClose() -- see its own
+// comment. Process-wide (not a LifeSpanHandler member): CEF looks up the
+// CefLifeSpanHandler via a fresh ClientHandler::GetLifeSpanHandler() call
+// each time it dispatches a life-span callback, which was observed to *not*
+// reliably return the same C++ LifeSpanHandler instance across two calls
+// milliseconds apart -- so instance-scoped state does not reliably survive
+// between the fake trigger and a late, genuine call. Browser identifiers
+// are unique and not reused within a single browser-process instance, so a
+// plain, never-pruned set is fine here (browsers are few relative to a
+// process's lifetime). Safe without a lock: OnBeforeClose() always runs on
+// TID_UI (REQUIRE_UI_THREAD() below), so this has no concurrent access.
+std::set<int> g_closed_browser_ids;
+
+}  // namespace
 
 LifeSpanHandler::LifeSpanHandler(JNIEnv* env, jobject handler)
     : handle_(env, handler) {}
@@ -108,6 +127,24 @@ void LifeSpanHandler::OnBeforeClose(CefRefPtr<CefBrowser> browser) {
   JCEF_TRACE("LifeSpanHandler::OnBeforeClose() ENTER browser_id=%d",
              browser->GetIdentifier());
   REQUIRE_UI_THREAD();
+
+  // Idempotency guard: this can now be invoked either by CEF itself (the
+  // normal path) or, for a windowed browser whose native close sequence
+  // hung, by JCEF itself simulating the callback after a bounded wait (see
+  // util_linux.cpp's FakeOnBeforeCloseIfNeeded -- Linux/X11-specific, see
+  // plan/roadmap.md's windowed-close investigation for why this is
+  // needed). Skip a second invocation for the same browser: whichever
+  // arrived first already ran the real cleanup below, and a late, genuine
+  // call arriving after JCEF's own simulated one must not double-invoke the
+  // user's LifeSpanHandler or double-dispose browser resources.
+  if (!g_closed_browser_ids.insert(browser->GetIdentifier()).second) {
+    JCEF_TRACE(
+        "LifeSpanHandler::OnBeforeClose() SKIP browser_id=%d (already "
+        "handled)",
+        browser->GetIdentifier());
+    return;
+  }
+
   ScopedJNIEnv env;
   if (!env)
     return;
