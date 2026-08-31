@@ -39,7 +39,8 @@ class CefFocusHandlerCoverageTest {
             + "</body></html>";
 
     @Test
-    void tabPastLastElementInvokesOnTakeFocus() throws InterruptedException {
+    void tabPastLastElementInvokesOnTakeFocus()
+            throws InterruptedException, java.lang.reflect.InvocationTargetException {
         boolean[] fired = {false};
         boolean[] receivedNext = {false};
         CountDownLatch done = new CountDownLatch(1);
@@ -55,15 +56,24 @@ class CefFocusHandlerCoverageTest {
 
         SharedBrowserExtension.loadPage(CONTENT);
         CefBrowser browser = SharedBrowserExtension.browser();
-        browser.setFocus(true);
+
+        // loadPage() blocks the calling (JUnit) thread until loading
+        // finishes, then returns control to that same non-EDT thread --
+        // unlike the original TestFrame-based version of this test, where
+        // this entire sequence ran from inside onLoadingStateChange() (an
+        // EDT callback), so setFocus() and the Tab-key dispatch were always
+        // EDT-consistent implicitly. Route back onto the EDT explicitly here
+        // to restore that same guarantee -- see plan/roadmap.md's two-tier
+        // harness entry: dispatching setFocus()/key events from the wrong
+        // thread reproduced as intermittent onTakeFocus timeouts/hangs.
+        javax.swing.SwingUtilities.invokeAndWait(() -> browser.setFocus(true));
 
         // Give the page a moment to actually apply the `autofocus` attribute
         // and for the OSR surface/focus state to settle before sending the
         // Tab key -- same rationale/timing as CefContextMenuTest's synthetic
         // click delay. javax.swing.Timer callbacks already run on the EDT
         // (same thread real AWT key events are delivered on), so dispatch
-        // directly here rather than through SwingUtilities.invokeAndWait/
-        // Later.
+        // directly here rather than through another invokeAndWait/Later.
         new javax.swing
                 .Timer(500,
                         ev -> {

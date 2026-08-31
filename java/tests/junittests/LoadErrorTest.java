@@ -11,35 +11,40 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import org.cef.browser.CefBrowser;
 import org.cef.browser.CefFrame;
 import org.cef.handler.CefLoadHandler.ErrorCode;
+import org.cef.handler.CefLoadHandlerAdapter;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+
+import java.util.concurrent.CountDownLatch;
 
 // Unhappy-path coverage for CefLoadHandler.onLoadError (native/load_handler.cpp),
 // previously never exercised -- every other test in this suite only follows the
 // happy load path. Navigating to an unregistered URL under our own intercepted
-// scheme (no addResource() entry, so TestFrame.getResourceHandler() returns null
-// and CEF fails the load) triggers a real ERR_* failure without any real network
-// access. See plan/roadmap.md Phase 3.
-@ExtendWith(TestSetupExtension.class)
+// scheme (no addResource() entry, so getResourceHandler() returns null and CEF
+// fails the load) triggers a real ERR_* failure without any real network access.
+// See plan/roadmap.md Phase 3.
+//
+// Migrated to the shared-browser (Tier 1) harness -- see plan/roadmap.md's
+// "two-tier test harness" entry. This test is what motivated
+// SharedBrowserExtension.addLoadHandler()/navigateTo(): the original,
+// simpler loadPage()-only design had no way for a test to observe
+// onLoadError itself.
+@ExtendWith({TestSetupExtension.class, SharedBrowserExtension.class})
 class LoadErrorTest {
-    private static final String MISSING_URL = "http://test.com/does-not-exist.html";
+    private static final String MISSING_URL = "http://test.com/shared/does-not-exist.html";
 
     @Test
     void navigatingToUnregisteredResourceInvokesOnLoadError() {
         ErrorCode[] errorCode = {null};
         String[] failedUrl = {null};
         boolean[] gotError = {false};
+        CountDownLatch done = new CountDownLatch(1);
 
-        TestFrame frame = new TestFrame() {
-            @Override
-            protected void setupTest() {
-                // Deliberately not calling addResource() -- this URL is never
-                // registered, so getResourceHandler() returns null and CEF fails
-                // the navigation with a real error code.
-                createBrowser(MISSING_URL, true /* useOSR */);
-                super.setupTest();
-            }
-
+        // Deliberately not calling loadPage()/registering any content for
+        // MISSING_URL -- SharedBrowserExtension's shared resource handler
+        // returns null for it, so CEF fails the navigation with a real
+        // error code.
+        SharedBrowserExtension.addLoadHandler(new CefLoadHandlerAdapter() {
             @Override
             public void onLoadError(CefBrowser browser, CefFrame frame, ErrorCode errorCode_,
                     String errorText, String failedUrl_) {
@@ -47,11 +52,14 @@ class LoadErrorTest {
                 gotError[0] = true;
                 errorCode[0] = errorCode_;
                 failedUrl[0] = failedUrl_;
-                terminateTest();
+                done.countDown();
             }
-        };
+        });
 
-        frame.awaitCompletion();
+        SharedBrowserExtension.navigateTo(MISSING_URL);
+        if (!gotError[0]) {
+            SharedBrowserExtension.awaitLatch(done, 10);
+        }
 
         assertTrue(gotError[0], "onLoadError was never invoked");
         assertNotNull(errorCode[0]);

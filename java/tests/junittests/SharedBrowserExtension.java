@@ -19,6 +19,7 @@ import org.cef.handler.CefFocusHandler;
 import org.cef.handler.CefJSDialogHandler;
 import org.cef.handler.CefKeyboardHandler;
 import org.cef.handler.CefLifeSpanHandlerAdapter;
+import org.cef.handler.CefLoadHandler;
 import org.cef.handler.CefLoadHandlerAdapter;
 import org.cef.handler.CefPrintHandler;
 import org.cef.handler.CefRequestHandlerAdapter;
@@ -73,6 +74,29 @@ import javax.swing.JFrame;
 //       }
 //   }
 //
+// THREADING (read this before writing interaction code after loadPage()/
+// navigateTo()): those methods block the *calling* thread (the JUnit test
+// thread) until loading finishes, then return control to that same thread.
+// TestFrame's older pattern instead crammed "page is ready, now do X" code
+// directly inside onLoadingStateChange() itself, an EDT callback -- which
+// made calls like setFocus() EDT-consistent for free, but only as an
+// accident of that structure. A real embedding application doesn't get that
+// for free either: it loads a page once, then responds to some *later*,
+// independent event (a button click, a menu action, a timer) to interact
+// with the browser, and has to be deliberate about EDT dispatch at that
+// point same as this harness does. So this isn't a workaround to route
+// around -- it's the harness matching real usage more closely than
+// TestFrame's pattern did. Any call here that needs to be EDT-consistent
+// with CEF's own state (setFocus(), dispatching synthetic AWT events, etc.)
+// must be wrapped in SwingUtilities.invokeAndWait() explicitly -- omitting
+// this reproduced as intermittent hangs/timeouts (caught on
+// CefFocusHandlerCoverageTest's setFocus() call during the first migration),
+// not a reliable failure, which is what made it easy to miss in a small
+// number of validation runs. Handler callbacks themselves (onTakeFocus,
+// onTitleChange, etc.) still fire on the EDT as normal; it's only code the
+// *test* runs directly after loadPage()/navigateTo() returns that needs
+// this.
+//
 // Order matters in @ExtendWith: TestSetupExtension first, then
 // SharedBrowserExtension. Both register themselves as
 // ExtensionContext.Store.CloseableResource in the GLOBAL store the first
@@ -92,6 +116,21 @@ public class SharedBrowserExtension implements BeforeAllCallback, BeforeEachCall
     private static final CountDownLatch closedLatch_ = new CountDownLatch(1);
     private static final AtomicInteger urlCounter_ = new AtomicInteger();
     private static final HashMap<String, ResourceContent> resourceMap_ = new HashMap<>();
+
+    // Backs loadPage()'s blocking wait -- set right before navigating,
+    // counted down by the permanent internal CefLoadHandler installed in
+    // initializeSharedBrowser() below, cleared right after. volatile: read
+    // from the CEF UI thread (same thread loadPage() itself runs on in this
+    // harness, so this is really just documentation of intent, not a real
+    // cross-thread race).
+    private static volatile CountDownLatch pendingLoadLatch_;
+
+    // Optional test-registered CefLoadHandler, forwarded every event by the
+    // permanent internal handler below -- lets a test observe onLoadStart/
+    // onLoadEnd/onLoadError/etc. (e.g. LoadErrorTest) without taking over
+    // the slot loadPage() itself depends on. Set/cleared via
+    // addLoadHandler()'s tracked cleanup.
+    private static volatile CefLoadHandler userLoadHandler_;
 
     // Cleanup actions (matching remove*Handler() calls) queued by this
     // test's add*Handler() calls, run automatically in afterEach() -- the
@@ -181,6 +220,48 @@ public class SharedBrowserExtension implements BeforeAllCallback, BeforeEachCall
             // to simulate a real user closing a real window.
         });
 
+        // Permanent (never removed) load handler: drives loadPage()'s
+        // blocking wait via pendingLoadLatch_, and forwards every event to
+        // an optional test-registered delegate (see addLoadHandler()) --
+        // this is what lets a test observe onLoadStart/onLoadEnd/
+        // onLoadError itself while loadPage() still works normally.
+        client_.addLoadHandler(new CefLoadHandlerAdapter() {
+            @Override
+            public void onLoadingStateChange(CefBrowser browser, boolean isLoading,
+                    boolean canGoBack, boolean canGoForward) {
+                if (!isLoading) {
+                    CountDownLatch latch = pendingLoadLatch_;
+                    if (latch != null) latch.countDown();
+                }
+                CefLoadHandler delegate = userLoadHandler_;
+                if (delegate != null) {
+                    delegate.onLoadingStateChange(browser, isLoading, canGoBack, canGoForward);
+                }
+            }
+
+            @Override
+            public void onLoadStart(CefBrowser browser, CefFrame frame,
+                    org.cef.network.CefRequest.TransitionType type) {
+                CefLoadHandler delegate = userLoadHandler_;
+                if (delegate != null) delegate.onLoadStart(browser, frame, type);
+            }
+
+            @Override
+            public void onLoadEnd(CefBrowser browser, CefFrame frame, int httpStatusCode) {
+                CefLoadHandler delegate = userLoadHandler_;
+                if (delegate != null) delegate.onLoadEnd(browser, frame, httpStatusCode);
+            }
+
+            @Override
+            public void onLoadError(CefBrowser browser, CefFrame frame,
+                    CefLoadHandler.ErrorCode errorCode, String errorText, String failedUrl) {
+                CefLoadHandler delegate = userLoadHandler_;
+                if (delegate != null) {
+                    delegate.onLoadError(browser, frame, errorCode, errorText, failedUrl);
+                }
+            }
+        });
+
         client_.addRequestHandler(new CefRequestHandlerAdapter() {
             @Override
             public org.cef.handler.CefResourceRequestHandler getResourceRequestHandler(
@@ -203,6 +284,18 @@ public class SharedBrowserExtension implements BeforeAllCallback, BeforeEachCall
         frame.pack();
         frame.setSize(800, 600);
         frame.setVisible(true);
+
+        // Warm up the shared browser with one real page load before any
+        // test runs -- mirrors TestSetupExtension.warmUpBrowserProcess()'s
+        // own precedent for the same class of problem. Found empirically:
+        // a test whose *first* navigation on a freshly-created browser
+        // deliberately fails (e.g. LoadErrorTest, testing onLoadError) did
+        // not reliably fire that callback when it was the very first
+        // navigation ever attempted (starting cold from "about:blank"); the
+        // identical navigation reliably worked once any other test had
+        // already loaded a real page first. A cheap, always-run warmup load
+        // here removes the ordering dependency entirely.
+        loadPage("<html><body>warmup</body></html>");
     }
 
     private static final org.cef.handler.CefResourceRequestHandler SHARED_RESOURCE_REQUEST_HANDLER =
@@ -242,13 +335,7 @@ public class SharedBrowserExtension implements BeforeAllCallback, BeforeEachCall
         }
 
         CountDownLatch loaded = new CountDownLatch(1);
-        client_.addLoadHandler(new CefLoadHandlerAdapter() {
-            @Override
-            public void onLoadingStateChange(CefBrowser browser, boolean isLoading,
-                    boolean canGoBack, boolean canGoForward) {
-                if (!isLoading) loaded.countDown();
-            }
-        });
+        pendingLoadLatch_ = loaded;
         try {
             browser_.loadURL(url);
             if (!loaded.await(30, TimeUnit.SECONDS)) {
@@ -258,9 +345,40 @@ public class SharedBrowserExtension implements BeforeAllCallback, BeforeEachCall
             Thread.currentThread().interrupt();
             fail("Interrupted while awaiting page load");
         } finally {
-            client_.removeLoadHandler();
+            pendingLoadLatch_ = null;
         }
         return url;
+    }
+
+    // Loads a URL directly (no addResource() entry, e.g. to deliberately
+    // trigger onLoadError -- see LoadErrorTest) and blocks until that
+    // navigation's loading-state transition completes, exactly like
+    // loadPage(), without registering any content for it.
+    public static synchronized void navigateTo(String url) {
+        CountDownLatch loaded = new CountDownLatch(1);
+        pendingLoadLatch_ = loaded;
+        try {
+            browser_.loadURL(url);
+            if (!loaded.await(30, TimeUnit.SECONDS)) {
+                fail("SharedBrowserExtension.navigateTo: navigation never finished: " + url);
+            }
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            fail("Interrupted while awaiting navigation");
+        } finally {
+            pendingLoadLatch_ = null;
+        }
+    }
+
+    // Registers a delegate to observe onLoadStart/onLoadEnd/onLoadError/
+    // onLoadingStateChange for the duration of the current test, forwarded
+    // by the permanent internal load handler installed in
+    // initializeSharedBrowser() -- loadPage()/navigateTo() keep working
+    // normally alongside it. Auto-removed by afterEach(), like the other
+    // add*Handler() wrappers.
+    public static void addLoadHandler(CefLoadHandler handler) {
+        userLoadHandler_ = handler;
+        trackCleanup(() -> userLoadHandler_ = null);
     }
 
     public static CefBrowser browser() {
