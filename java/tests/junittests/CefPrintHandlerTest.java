@@ -16,6 +16,7 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.concurrent.CountDownLatch;
 
 // Exercises native/pdf_print_callback.cpp (0% covered per this session's baseline
 // gcovr run; see plan/roadmap.md Phase 2) via CefBrowser.printToPDF().
@@ -30,44 +31,37 @@ import java.nio.file.Path;
 // window.print()/print-dialog path, not printToPDF -- see
 // browserPrintInvokesPrintStartSettingsAndDialog() below, @Disabled, for
 // that path.
-@ExtendWith(TestSetupExtension.class)
+// Migrated to the shared-browser (Tier 1) harness for the enabled test
+// below -- see plan/roadmap.md's "two-tier test harness" entry. The
+// @Disabled test further down stays on TestFrame unchanged (both can
+// coexist in one class: TestFrame is just instantiated directly, not tied
+// to the extension).
+@ExtendWith({TestSetupExtension.class, SharedBrowserExtension.class})
 class CefPrintHandlerTest {
-    private static final String TEST_URL = "http://test.com/print_handler.html";
     private static final String CONTENT = "<html><body>print handler test</body></html>";
+    // Only used by the @Disabled test below (which stays on TestFrame).
+    private static final String TEST_URL = "http://test.com/print_handler.html";
 
     @Test
     void printToPDFWritesARealFileAndInvokesCompletionCallback() throws IOException {
         boolean[] gotFinished = {false};
         boolean[] finishedOk = {false};
+        CountDownLatch done = new CountDownLatch(1);
 
         Path outFile = Files.createTempFile("jcef-print-handler-test", ".pdf");
         Files.delete(outFile);
 
-        TestFrame frame = new TestFrame() {
-            @Override
-            protected void setupTest() {
-                client_.addPrintHandler(new CefPrintHandlerAdapter() {});
+        SharedBrowserExtension.addPrintHandler(new CefPrintHandlerAdapter() {});
+        SharedBrowserExtension.loadPage(CONTENT);
 
-                addResource(TEST_URL, CONTENT, "text/html");
-                createBrowser(TEST_URL, true /* useOSR */);
-                super.setupTest();
-            }
-
-            @Override
-            public void onLoadingStateChange(CefBrowser browser, boolean isLoading,
-                    boolean canGoBack, boolean canGoForward) {
-                if (isLoading) return;
-                browser.printToPDF(outFile.toString(), new CefPdfPrintSettings(),
-                        (path, ok) -> {
-                            gotFinished[0] = true;
-                            finishedOk[0] = ok;
-                            terminateTest();
-                        });
-            }
-        };
-
+        CefBrowser browser = SharedBrowserExtension.browser();
         try {
-            frame.awaitCompletion();
+            browser.printToPDF(outFile.toString(), new CefPdfPrintSettings(), (path, ok) -> {
+                gotFinished[0] = true;
+                finishedOk[0] = ok;
+                done.countDown();
+            });
+            SharedBrowserExtension.awaitLatch(done, 15);
 
             assertTrue(gotFinished[0], "onPdfPrintFinished was never invoked");
             assertTrue(finishedOk[0], "PDF printing did not complete successfully");

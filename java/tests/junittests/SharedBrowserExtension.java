@@ -157,6 +157,21 @@ public class SharedBrowserExtension implements BeforeAllCallback, BeforeEachCall
     private static volatile String pendingLoadUrl_;
     private static volatile boolean pendingLoadArmed_;
 
+    // Set alongside the completion signal (onLoadEnd -> true, onLoadError
+    // matching pendingLoadUrl_ -> false) so loadPage() can tell a genuine
+    // success from a failure/abort of its OWN navigation -- unlike
+    // navigateTo(), which is explicitly used for navigations that are
+    // SUPPOSED to fail (LoadErrorTest, UpstreamIssue365Test), loadPage()'s
+    // contract is "this must actually serve the given content." Found via
+    // the diagnostic log: a loadPage() call following closely after a
+    // DIFFERENT navigation's failure (e.g. navigateTo() to an unhandled
+    // scheme, run by an earlier test) can itself get ERR_ABORTED -- CEF
+    // aborting a brand new navigation because the browser hadn't finished
+    // settling the previous one yet, not because of anything wrong with
+    // the new request. loadPage() retries in that specific case instead of
+    // silently returning as if the content had loaded.
+    private static volatile boolean pendingLoadSucceeded_;
+
     // Always-on, bounded ring buffer of every event the harness's permanent
     // internal handlers observe (load state/start/end/error, resource
     // lookups) -- cheap enough to leave on unconditionally, and exactly the
@@ -346,7 +361,10 @@ public class SharedBrowserExtension implements BeforeAllCallback, BeforeEachCall
                         frame.getURL(), httpStatusCode);
                 if (frame.isMain()) {
                     CountDownLatch latch = pendingLoadLatch_;
-                    if (latch != null && pendingLoadArmed_) latch.countDown();
+                    if (latch != null && pendingLoadArmed_) {
+                        pendingLoadSucceeded_ = true;
+                        latch.countDown();
+                    }
                 }
                 CefLoadHandler delegate = userLoadHandler_;
                 if (delegate != null) delegate.onLoadEnd(browser, frame, httpStatusCode);
@@ -540,22 +558,38 @@ public class SharedBrowserExtension implements BeforeAllCallback, BeforeEachCall
             resourceMap_.put(url, new ResourceContent(html, mimeType, headers));
         }
 
-        CountDownLatch loaded = new CountDownLatch(1);
-        pendingLoadArmed_ = false;
-        pendingLoadUrl_ = url;
-        pendingLoadLatch_ = loaded;
-        try {
-            browser_.loadURL(url);
-            if (!loaded.await(30, TimeUnit.SECONDS)) {
-                fail("SharedBrowserExtension.loadPage: page never finished loading: " + url
+        // Retry up to 3 attempts total: a loadPage() call following closely
+        // after a DIFFERENT navigation's failure/teardown can itself get
+        // ERR_ABORTED (see pendingLoadSucceeded_'s comment) -- a transient
+        // race, not a real problem with this request, so a same-URL retry
+        // is the right response rather than silently returning as if the
+        // content had actually loaded (which onLoadError alone can't tell
+        // apart from onLoadEnd without pendingLoadSucceeded_).
+        for (int attempt = 1; attempt <= 3; attempt++) {
+            CountDownLatch loaded = new CountDownLatch(1);
+            pendingLoadArmed_ = false;
+            pendingLoadSucceeded_ = false;
+            pendingLoadUrl_ = url;
+            pendingLoadLatch_ = loaded;
+            try {
+                browser_.loadURL(url);
+                if (!loaded.await(30, TimeUnit.SECONDS)) {
+                    fail("SharedBrowserExtension.loadPage: page never finished loading: " + url
+                            + dumpDiagnostics());
+                }
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                fail("Interrupted while awaiting page load");
+            } finally {
+                pendingLoadLatch_ = null;
+                pendingLoadUrl_ = null;
+            }
+            if (pendingLoadSucceeded_) return url;
+            if (attempt == 3) {
+                fail("SharedBrowserExtension.loadPage: " + url
+                        + " kept failing/aborting after " + attempt + " attempts"
                         + dumpDiagnostics());
             }
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-            fail("Interrupted while awaiting page load");
-        } finally {
-            pendingLoadLatch_ = null;
-            pendingLoadUrl_ = null;
         }
         return url;
     }
@@ -634,6 +668,11 @@ public class SharedBrowserExtension implements BeforeAllCallback, BeforeEachCall
     public static void addDialogHandler(org.cef.handler.CefDialogHandler handler) {
         client_.addDialogHandler(handler);
         trackCleanup(client_::removeDialogHandler);
+    }
+
+    public static void addDragHandler(org.cef.handler.CefDragHandler handler) {
+        client_.addDragHandler(handler);
+        trackCleanup(client_::removeDragHandler);
     }
 
     public static void addDisplayHandler(CefDisplayHandler handler) {

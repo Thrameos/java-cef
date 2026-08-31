@@ -16,6 +16,7 @@ import org.junit.jupiter.api.extension.ExtendWith;
 
 import java.awt.Point;
 import java.lang.reflect.Method;
+import java.util.concurrent.CountDownLatch;
 
 // Exercises native/drag_handler.cpp's DragHandler::OnDragEnter (previously 0%
 // covered -- see plan/coverage-native-llvm-report.txt; no existing test triggered
@@ -31,9 +32,11 @@ import java.lang.reflect.Method;
 // on the package-private CefBrowser_N (org.cef.browser, not accessible from this
 // package at compile time), so it's invoked via reflection -- walking up from the
 // browser's runtime class since CefBrowserOsr doesn't declare it itself.
-@ExtendWith(TestSetupExtension.class)
+//
+// Migrated to the shared-browser (Tier 1) harness -- see plan/roadmap.md's
+// "two-tier test harness" entry.
+@ExtendWith({TestSetupExtension.class, SharedBrowserExtension.class})
 class DragTargetTest {
-    private static final String TEST_URL = "http://test.com/drag_target.html";
     private static final String DRAGGED_LINK_URL = "http://example.com/dragged-link";
 
     @Test
@@ -41,36 +44,25 @@ class DragTargetTest {
         boolean[] fired = {false};
         int[] receivedMask = {-1};
         String[] receivedLinkUrl = {null};
+        CountDownLatch done = new CountDownLatch(1);
 
-        TestFrame frame = new TestFrame() {
-            @Override
-            protected void setupTest() {
-                client_.addDragHandler((browser, dragData, mask) -> {
-                    fired[0] = true;
-                    receivedMask[0] = mask;
-                    receivedLinkUrl[0] = dragData.getLinkURL();
-                    terminateTest();
-                    return false;
-                });
-                addResource(TEST_URL, "<html><body>drag target</body></html>", "text/html");
-                createBrowser(TEST_URL, true /* useOSR */);
-                super.setupTest();
-            }
+        SharedBrowserExtension.addDragHandler((browser, dragData, mask) -> {
+            fired[0] = true;
+            receivedMask[0] = mask;
+            receivedLinkUrl[0] = dragData.getLinkURL();
+            done.countDown();
+            return false;
+        });
 
-            @Override
-            public void onLoadingStateChange(CefBrowser browser, boolean isLoading,
-                    boolean canGoBack, boolean canGoForward) {
-                if (isLoading) return;
+        SharedBrowserExtension.loadPage("<html><body>drag target</body></html>");
 
-                CefDragData dragData = CefDragData.create();
-                dragData.setLinkURL(DRAGGED_LINK_URL);
-                invokeDragTargetDragEnter(
-                        browser, dragData, DragOperationMask.DRAG_OPERATION_COPY);
-                dragData.dispose();
-            }
-        };
+        CefBrowser browser = SharedBrowserExtension.browser();
+        try (CefDragData dragData = CefDragData.create()) {
+            dragData.setLinkURL(DRAGGED_LINK_URL);
+            invokeDragTargetDragEnter(browser, dragData, DragOperationMask.DRAG_OPERATION_COPY);
+        }
 
-        frame.awaitCompletion();
+        SharedBrowserExtension.awaitLatch(done, 15);
 
         assertTrue(fired[0], "onDragEnter should have fired after dragTargetDragEnter()");
         assertEquals(DragOperationMask.DRAG_OPERATION_COPY, receivedMask[0]);
