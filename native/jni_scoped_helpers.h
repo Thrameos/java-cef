@@ -20,6 +20,7 @@
 #include "include/cef_resource_request_handler.h"
 #include "include/cef_response.h"
 #include "include/wrapper/cef_message_router.h"
+#include "jcef_trace.h"
 
 //
 // --------
@@ -423,8 +424,27 @@ struct SetCefForJNIObjectHelper {
     return obj;
   }
 
-  static inline void AddRef(CefBaseRefCounted* obj) { obj->AddRef(); }
-  static inline void Release(CefBaseRefCounted* obj) { obj->Release(); }
+  // REF-trace format (see jcef_trace.h / tools/analyze_jcef_trace.py): every
+  // ref/unref-shaped event is logged as "REF kind=<KIND> ptr=<pointer>" so a
+  // post-process script can pair NEW/ADDREF against DEL/RELEASE per pointer
+  // and flag unbalanced (leaked) or use-after-free (an event on a pointer
+  // after its refcount should already be zero) patterns mechanically, without
+  // hand-reading every trace. High-frequency (every value-object/handler
+  // dispose) -- only ever costs anything in a JCEF_ENABLE_TRACE build with
+  // JCEF_TRACE=1 set.
+  static inline void AddRef(CefBaseRefCounted* obj) {
+    JCEF_TRACE("REF kind=CEF_ADDREF ptr=%p", (void*)obj);
+    obj->AddRef();
+  }
+  static inline void Release(CefBaseRefCounted* obj) {
+    // Verified via this trace during the issue #4/#23 investigation that
+    // Thrameos/java-cef#22's crash (SIGSEGV inside this exact function) does
+    // NOT reproduce in the minimal repro (every ADDREF/RELEASE here paired
+    // cleanly) -- that crash and the all_.empty() DCHECK are separate bugs,
+    // not the same root cause.
+    JCEF_TRACE("REF kind=CEF_RELEASE ptr=%p", (void*)obj);
+    obj->Release();
+  }
 
   template <class T>
   static inline T* Get(CefRefPtr<T> obj) {
@@ -521,6 +541,14 @@ class ScopedJNIBase {
 
   virtual ~ScopedJNIBase() {
     if (jhandle_ && delete_ref_) {
+      // Single choke point for every local-ref-owning scoped JNI type
+      // (ScopedJNIObjectLocal/Result, ScopedJNIObject, ScopedJNIClass,
+      // ScopedJNIString, etc. all derive from this). See the REF-trace format
+      // note on SetCefForJNIObjectHelper::Release() above -- a repeated
+      // JNI_LREF_DEL for the same ptr with no JNI object creation in between
+      // is a double-DeleteLocalRef (the exact bug class fixed in
+      // render_handler.cpp's GetJNIScreenInfo() this same session).
+      JCEF_TRACE("REF kind=JNI_LREF_DEL ptr=%p", (void*)jhandle_);
       env_->DeleteLocalRef(jhandle_);
     }
   }
@@ -995,11 +1023,15 @@ bool SetCefForJNIObject(JNIEnv* env,
                        identifer.get(), (jlong)base);
   if (base) {
     // Add a reference to the new base object.
+    JCEF_TRACE("SetCefForJNIObject varName=%s ptr=%p ADDREF", varName,
+               (void*)base);
     SetCefForJNIObjectHelper::AddRef(base);
   }
   if (previousValue != 0) {
     // Remove a reference from the previous base object, now that the
     // Java-side pointer no longer refers to it.
+    JCEF_TRACE("SetCefForJNIObject varName=%s ptr=%p RELEASE", varName,
+               (void*)previousValue);
     SetCefForJNIObjectHelper::Release(reinterpret_cast<T*>(previousValue));
   }
   return true;
@@ -1052,6 +1084,8 @@ bool SetCefForJNIObject_sync(JNIEnv* env,
   JNI_CALL_VOID_METHOD(env, obj, "setNativeRef", "(Ljava/lang/String;J)V",
                        identifer.get(), (jlong)base);
   if (base) {
+    JCEF_TRACE("SetCefForJNIObject_sync varName=%s ptr=%p ADDREF", varName,
+               (void*)base);
     SetCefForJNIObjectHelper::AddRef(base);
   }
 
@@ -1063,6 +1097,8 @@ bool SetCefForJNIObject_sync(JNIEnv* env,
                        identifer.get());
 
   if (previousValue != 0) {
+    JCEF_TRACE("SetCefForJNIObject_sync varName=%s ptr=%p RELEASE", varName,
+               (void*)previousValue);
     SetCefForJNIObjectHelper::Release(reinterpret_cast<T*>(previousValue));
   }
   return true;

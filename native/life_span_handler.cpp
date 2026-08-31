@@ -5,6 +5,7 @@
 #include "life_span_handler.h"
 
 #include "client_handler.h"
+#include "jcef_trace.h"
 #include "jni_util.h"
 #include "util.h"
 
@@ -90,6 +91,8 @@ bool LifeSpanHandler::DoClose(CefRefPtr<CefBrowser> browser) {
 }
 
 void LifeSpanHandler::OnBeforeClose(CefRefPtr<CefBrowser> browser) {
+  JCEF_TRACE("LifeSpanHandler::OnBeforeClose() ENTER browser_id=%d",
+             browser->GetIdentifier());
   REQUIRE_UI_THREAD();
   ScopedJNIEnv env;
   if (!env)
@@ -107,7 +110,10 @@ void LifeSpanHandler::OnBeforeClose(CefRefPtr<CefBrowser> browser) {
 
   CefRefPtr<ClientHandler> client =
       (ClientHandler*)browser->GetHost()->GetClient().get();
+  JCEF_TRACE("LifeSpanHandler::OnBeforeClose() calling client->OnBeforeClose()");
   client->OnBeforeClose(browser);
+  JCEF_TRACE("LifeSpanHandler::OnBeforeClose() EXIT browser_id=%d",
+             browser->GetIdentifier());
 }
 
 void LifeSpanHandler::OnAfterParentChanged(CefRefPtr<CefBrowser> browser) {

@@ -130,6 +130,14 @@ if(ENABLE_COVERAGE AND NOT CMAKE_SYSTEM_NAME STREQUAL "Windows")
   endif()
 endif()
 
+# Permanent lightweight tracing facility (native/jcef_trace.h) for instrumenting
+# native lifecycle/teardown paths without hand-adding and later removing fprintf
+# calls each time -- see plan/findings.md's root-cause investigation of issue
+# #4/#23. Compiled to a true no-op when off; even when on, each JCEF_TRACE() call
+# is gated by a cheap runtime check of the JCEF_TRACE env var, so leaving this ON
+# in Debug/coverage builds costs nothing unless a session actually sets that var.
+option(JCEF_ENABLE_TRACE "Compile in the JCEF_TRACE() native instrumentation macro (see native/jcef_trace.h); still silent at runtime unless the JCEF_TRACE env var is set" OFF)
+
 # Use folders in the resulting project files.
 set_property(GLOBAL PROPERTY OS_FOLDERS ON)
 

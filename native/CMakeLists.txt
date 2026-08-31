@@ -469,3 +469,8 @@ if(ENABLE_COVERAGE AND NOT OS_WINDOWS)
   target_link_options(${JCEF_TARGET} PRIVATE --coverage)
 endif()
 
+# See CMakeLists.txt's JCEF_ENABLE_TRACE option / native/jcef_trace.h.
+if(JCEF_ENABLE_TRACE)
+  target_compile_definitions(${JCEF_TARGET} PRIVATE JCEF_ENABLE_TRACE)
+endif()
+

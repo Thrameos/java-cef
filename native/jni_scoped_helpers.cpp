@@ -260,11 +260,15 @@ ScopedJNIObjectGlobal::ScopedJNIObjectGlobal(JNIEnv* env, jobject handle)
   if (handle) {
     jhandle_ = env->NewGlobalRef(handle);
     DCHECK(jhandle_);
+    // See the REF-trace format note on SetCefForJNIObjectHelper::Release()
+    // in jni_scoped_helpers.h.
+    JCEF_TRACE("REF kind=JNI_GREF_NEW ptr=%p", (void*)jhandle_);
   }
 }
 
 ScopedJNIObjectGlobal::~ScopedJNIObjectGlobal() {
   if (jhandle_) {
+    JCEF_TRACE("REF kind=JNI_GREF_DEL ptr=%p", (void*)jhandle_);
     ScopedJNIEnv env;
     if (env)
       env->DeleteGlobalRef(jhandle_);
