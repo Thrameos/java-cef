@@ -4,6 +4,7 @@
 
 package tests.junittests;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.cef.CefSettings;
@@ -13,10 +14,19 @@ import org.cef.handler.CefDisplayHandlerAdapter;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 
+import java.util.concurrent.CountDownLatch;
+
 // Test the DisplayHandler implementation.
-@ExtendWith(TestSetupExtension.class)
+//
+// Migrated to the shared-browser (Tier 1) harness -- see plan/roadmap.md's
+// "two-tier test harness" entry -- as one of the two proof-of-concept
+// classes: this test (with CefFocusHandlerCoverageTest) is what originally
+// reproduced issue #4/#23's second, still-unfixed all_.empty() mechanism
+// when both ran under TestFrame's one-browser-per-test model, so it doubles
+// as regression coverage that the shared-browser harness actually avoids
+// that exposure.
+@ExtendWith({TestSetupExtension.class, SharedBrowserExtension.class})
 class DisplayHandlerTest {
-    private final String testUrl_ = "http://test.com/test.html";
     private final String testContent_ =
             "<html><head><title>Test Title</title></head><body>Test!</body></html>";
 
@@ -24,118 +34,82 @@ class DisplayHandlerTest {
 
     @Test
     void onTitleChange() {
-        TestFrame frame = new TestFrame() {
+        CountDownLatch done = new CountDownLatch(1);
+        SharedBrowserExtension.addDisplayHandler(new CefDisplayHandlerAdapter() {
             @Override
-            protected void setupTest() {
-                client_.addDisplayHandler(new CefDisplayHandlerAdapter() {
-                    @Override
-                    public void onTitleChange(CefBrowser browser, String title) {
-                        // onTitleChange can legitimately fire more than once with the
-                        // same title -- observed a second call from inside
-                        // CefBrowser_N.close() itself during OSR teardown, not just
-                        // during page load. Treat gotCallback_ as an idempotency
-                        // guard, not a strict single-call assertion: an uncaught
-                        // AssertionError thrown from inside this native callback can
-                        // corrupt later browser teardown (observed as a DCHECK
-                        // failure in Debug builds), so a duplicate call must not
-                        // throw.
-                        if (gotCallback_ || !"Test Title".equals(title)) {
-                            return;
-                        }
-                        gotCallback_ = true;
-                        terminateTest();
-                    }
-                });
-
-                addResource(testUrl_, testContent_, "text/html");
-
-                // Use OSR: TestFrame's default windowed (non-OSR) browser close
-                // handshake hangs (onBeforeClose never fires after native window
-                // disposal), reproduced in two independent headless environments --
-                // see plan/findings.md and upstream java-cef#364.
-                createBrowser(testUrl_, true /* useOSR */);
-
-                super.setupTest();
+            public void onTitleChange(CefBrowser browser, String title) {
+                // onTitleChange can legitimately fire more than once with the
+                // same title -- treat gotCallback_ as an idempotency guard, not
+                // a strict single-call assertion (see the original TestFrame-
+                // based version of this test for the fuller history: an
+                // uncaught AssertionError thrown from inside this native
+                // callback can corrupt later browser teardown).
+                if (gotCallback_ || !"Test Title".equals(title)) {
+                    return;
+                }
+                gotCallback_ = true;
+                done.countDown();
             }
-        };
+        });
 
-        frame.awaitCompletion();
+        SharedBrowserExtension.loadPage(testContent_);
+        SharedBrowserExtension.awaitLatch(done, 10);
 
         assertTrue(gotCallback_);
     }
 
     @Test
     void onAddressChange() {
-        TestFrame frame = new TestFrame() {
+        CountDownLatch done = new CountDownLatch(1);
+        String[] receivedUrl = {null};
+        SharedBrowserExtension.addDisplayHandler(new CefDisplayHandlerAdapter() {
             @Override
-            protected void setupTest() {
-                client_.addDisplayHandler(new CefDisplayHandlerAdapter() {
-                    @Override
-                    public void onAddressChange(CefBrowser browser, CefFrame frame, String url) {
-                        // See the comment in onTitleChange() above: treat
-                        // gotCallback_ as an idempotency guard, not a strict
-                        // single-call assertion, since an uncaught assertion here can
-                        // corrupt later browser teardown.
-                        if (gotCallback_ || !testUrl_.equals(url)) {
-                            return;
-                        }
-                        gotCallback_ = true;
-                        terminateTest();
-                    }
-                });
-
-                addResource(testUrl_, testContent_, "text/html");
-
-                // Use OSR: TestFrame's default windowed (non-OSR) browser close
-                // handshake hangs (onBeforeClose never fires after native window
-                // disposal), reproduced in two independent headless environments --
-                // see plan/findings.md and upstream java-cef#364.
-                createBrowser(testUrl_, true /* useOSR */);
-
-                super.setupTest();
+            public void onAddressChange(CefBrowser browser, CefFrame frame, String url) {
+                if (gotCallback_) return;
+                gotCallback_ = true;
+                receivedUrl[0] = url;
+                done.countDown();
             }
-        };
+        });
 
-        frame.awaitCompletion();
+        // onAddressChange typically fires at navigation start, before
+        // loadPage() returns -- but the URL it'll fire with isn't known
+        // until loadPage() assigns it internally, so the comparison has to
+        // happen after the fact regardless of exactly when the callback ran.
+        String expectedUrl = SharedBrowserExtension.loadPage(testContent_);
+        if (!gotCallback_) {
+            SharedBrowserExtension.awaitLatch(done, 10);
+        }
 
         assertTrue(gotCallback_);
+        assertEquals(expectedUrl, receivedUrl[0]);
     }
 
     @Test
     void onConsoleMessage() {
-        String consoleUrl = "http://test.com/console_test.html";
         String consoleContent = "<html><body><script>"
                 + "console.log('jcef-console-test-marker');"
                 + "</script></body></html>";
         boolean[] gotMessage = {false};
+        CountDownLatch done = new CountDownLatch(1);
 
-        TestFrame frame = new TestFrame() {
+        SharedBrowserExtension.addDisplayHandler(new CefDisplayHandlerAdapter() {
             @Override
-            protected void setupTest() {
-                client_.addDisplayHandler(new CefDisplayHandlerAdapter() {
-                    @Override
-                    public boolean onConsoleMessage(CefBrowser browser,
-                            CefSettings.LogSeverity level, String message, String source,
-                            int line) {
-                        // See the comment in onTitleChange() above: treat gotMessage
-                        // as an idempotency guard rather than throwing from inside
-                        // this native callback.
-                        if (gotMessage[0] || !message.contains("jcef-console-test-marker")) {
-                            return false;
-                        }
-                        gotMessage[0] = true;
-                        terminateTest();
-                        return false;
-                    }
-                });
-
-                addResource(consoleUrl, consoleContent, "text/html");
-                createBrowser(consoleUrl, true /* useOSR */);
-                super.setupTest();
+            public boolean onConsoleMessage(CefBrowser browser, CefSettings.LogSeverity level,
+                    String message, String source, int line) {
+                if (gotMessage[0] || !message.contains("jcef-console-test-marker")) {
+                    return false;
+                }
+                gotMessage[0] = true;
+                done.countDown();
+                return false;
             }
-        };
+        });
 
-        frame.awaitCompletion();
+        SharedBrowserExtension.loadPage(consoleContent);
+        if (!gotMessage[0]) {
+            SharedBrowserExtension.awaitLatch(done, 10);
+        }
 
         assertTrue(gotMessage[0], "onConsoleMessage never fired for the page's console.log()");
     }
