@@ -8,8 +8,11 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 
 import org.cef.browser.CefBrowser;
 import org.cef.handler.CefRequestHandler.TerminationStatus;
+import org.cef.handler.CefRequestHandlerAdapter;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+
+import java.util.concurrent.CountDownLatch;
 
 // native/request_handler.cpp (96 lines, 34% covered per this session's baseline):
 // exercises RequestHandler::OnRenderProcessTerminated via Chromium's own
@@ -21,44 +24,34 @@ import org.junit.jupiter.api.extension.ExtendWith;
 // challenge, or an invalid HTTPS certificate to trigger -- each meaningfully
 // harder to synthesize safely/reliably in this headless OSR environment than
 // this one, left as an open gap rather than a flaky test.
-@ExtendWith(TestSetupExtension.class)
+//
+// Migrated to the shared-browser (Tier 1) harness -- see plan/roadmap.md's
+// "two-tier test harness" entry.
+@ExtendWith({TestSetupExtension.class, SharedBrowserExtension.class})
 class CefRequestHandlerCoverageTest {
-    private static final String TEST_URL = "http://test.com/request_handler_coverage.html";
     private static final String CONTENT = "<html><body>request handler coverage</body></html>";
 
     @Test
     void renderProcessTerminatedFiresForARealRendererCrash() {
         TerminationStatus[] lastStatus = {null};
+        CountDownLatch terminated = new CountDownLatch(1);
 
-        TestFrame frame = new TestFrame() {
-            @Override
-            protected void setupTest() {
-                addResource(TEST_URL, CONTENT, "text/html");
-                createBrowser(TEST_URL, true /* useOSR */);
-                super.setupTest();
-            }
-
-            @Override
-            public void onLoadingStateChange(CefBrowser browser, boolean isLoading,
-                    boolean canGoBack, boolean canGoForward) {
-                if (isLoading || lastStatus[0] != null) return;
-                // Only navigate once, on the initial page's completed load --
-                // chrome://crash never itself finishes loading (that's the
-                // point), so this guard (lastStatus[0] != null once the
-                // crash is observed) also prevents re-navigating on any
-                // loading-state churn the crash itself might produce.
-                browser.loadURL("chrome://crash");
-            }
-
+        SharedBrowserExtension.addRequestHandler(new CefRequestHandlerAdapter() {
             @Override
             public void onRenderProcessTerminated(CefBrowser browser, TerminationStatus status,
-                    int error_code, String error_string) {
+                    int errorCode, String errorString) {
+                if (lastStatus[0] != null) return;
                 lastStatus[0] = status;
-                terminateTest();
+                terminated.countDown();
             }
-        };
+        });
 
-        frame.awaitCompletion();
+        SharedBrowserExtension.loadPage(CONTENT);
+        // chrome://crash never itself finishes loading (that's the point) --
+        // just fire the navigation and wait directly on the termination
+        // callback rather than any loading-state signal.
+        SharedBrowserExtension.browser().loadURL("chrome://crash");
+        SharedBrowserExtension.awaitLatch(terminated, 15);
 
         assertNotNull(lastStatus[0], "onRenderProcessTerminated was never invoked");
     }

@@ -132,6 +132,13 @@ public class SharedBrowserExtension implements BeforeAllCallback, BeforeEachCall
     // addLoadHandler()'s tracked cleanup.
     private static volatile CefLoadHandler userLoadHandler_;
 
+    // Same idea as userLoadHandler_ above, for CefRequestHandler --
+    // getResourceRequestHandler() itself stays fixed/harness-owned (see the
+    // permanent request handler in initializeSharedBrowser()); every other
+    // event (onBeforeBrowse, onOpenURLFromTab, getAuthCredentials,
+    // onCertificateError, onRenderProcessTerminated) is forwarded.
+    private static volatile org.cef.handler.CefRequestHandler userRequestHandler_;
+
     // Cleanup actions (matching remove*Handler() calls) queued by this
     // test's add*Handler() calls, run automatically in afterEach() -- the
     // "share common cleanup" half of the two-tier design, so migrated tests
@@ -264,13 +271,63 @@ public class SharedBrowserExtension implements BeforeAllCallback, BeforeEachCall
             }
         });
 
+        // Permanent (never removed) request handler: getResourceRequestHandler()
+        // stays fixed (routing decisions are harness-owned, see the
+        // resource-map lookup below) -- but every other CefRequestHandler
+        // event is forwarded to an optional test-registered delegate, same
+        // pattern as the load handler above.
         client_.addRequestHandler(new CefRequestHandlerAdapter() {
+            @Override
+            public boolean onBeforeBrowse(CefBrowser browser, CefFrame frame,
+                    org.cef.network.CefRequest request, boolean userGesture, boolean isRedirect) {
+                org.cef.handler.CefRequestHandler delegate = userRequestHandler_;
+                return delegate != null
+                        && delegate.onBeforeBrowse(browser, frame, request, userGesture, isRedirect);
+            }
+
+            @Override
+            public boolean onOpenURLFromTab(CefBrowser browser, CefFrame frame, String targetUrl,
+                    boolean userGesture) {
+                org.cef.handler.CefRequestHandler delegate = userRequestHandler_;
+                return delegate != null
+                        && delegate.onOpenURLFromTab(browser, frame, targetUrl, userGesture);
+            }
+
             @Override
             public org.cef.handler.CefResourceRequestHandler getResourceRequestHandler(
                     CefBrowser browser, CefFrame frame, org.cef.network.CefRequest request,
                     boolean isNavigation, boolean isDownload, String requestInitiator,
                     org.cef.misc.BoolRef disableDefaultHandling) {
                 return SHARED_RESOURCE_REQUEST_HANDLER;
+            }
+
+            @Override
+            public boolean getAuthCredentials(CefBrowser browser, String originUrl,
+                    boolean isProxy, String host, int port, String realm, String scheme,
+                    org.cef.callback.CefAuthCallback callback) {
+                org.cef.handler.CefRequestHandler delegate = userRequestHandler_;
+                return delegate != null
+                        && delegate.getAuthCredentials(
+                                browser, originUrl, isProxy, host, port, realm, scheme, callback);
+            }
+
+            @Override
+            public boolean onCertificateError(CefBrowser browser,
+                    CefLoadHandler.ErrorCode certError, String requestUrl,
+                    org.cef.callback.CefCallback callback) {
+                org.cef.handler.CefRequestHandler delegate = userRequestHandler_;
+                return delegate != null
+                        && delegate.onCertificateError(browser, certError, requestUrl, callback);
+            }
+
+            @Override
+            public void onRenderProcessTerminated(CefBrowser browser,
+                    org.cef.handler.CefRequestHandler.TerminationStatus status, int errorCode,
+                    String errorString) {
+                org.cef.handler.CefRequestHandler delegate = userRequestHandler_;
+                if (delegate != null) {
+                    delegate.onRenderProcessTerminated(browser, status, errorCode, errorString);
+                }
             }
         });
 
@@ -470,6 +527,16 @@ public class SharedBrowserExtension implements BeforeAllCallback, BeforeEachCall
             client_.removeMessageRouter(router);
             router.dispose();
         });
+    }
+
+    // Unlike the other add*Handler() wrappers, CefClient only allows one
+    // CefRequestHandler total, and it's already permanently installed above
+    // (forwarding to userRequestHandler_) so getResourceRequestHandler()
+    // stays fixed to SHARED_RESOURCE_REQUEST_HANDLER regardless of what a
+    // test installs here. This just sets/clears the delegate.
+    public static void addRequestHandler(org.cef.handler.CefRequestHandler handler) {
+        userRequestHandler_ = handler;
+        trackCleanup(() -> userRequestHandler_ = null);
     }
 
     private static void trackCleanup(Runnable remover) {
