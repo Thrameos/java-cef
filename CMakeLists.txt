@@ -130,6 +130,45 @@ if(ENABLE_COVERAGE AND NOT CMAKE_SYSTEM_NAME STREQUAL "Windows")
   endif()
 endif()
 
+# Clang source-based coverage (-fprofile-instr-generate/-fcoverage-mapping) for the
+# jcef target, as an alternative to ENABLE_COVERAGE's gcov instrumentation. gcov's
+# .gcda writer is not multi-process-safe -- CEF's zygote-style fork() (child processes
+# that briefly share the parent's already-loaded, already-instrumented libjcef.so
+# before specializing) let a child's own atexit-triggered gcov dump silently overwrite
+# the parent's real counters with near-zero data (see plan/findings.md's 2026-08-30
+# "coverage partial writer" investigation for the live repro/evidence). Clang's
+# source-based coverage avoids this by design: each process gets its own raw profile
+# file (LLVM_PROFILE_FILE's %p pattern embeds the PID), merged afterward with
+# llvm-profdata -- the same fix Chromium itself uses for its own coverage builds,
+# per docs/code_coverage.md. Requires clang/clang++ (CMAKE_C_COMPILER/CMAKE_CXX_COMPILER)
+# instead of gcc -- gcov's --coverage flags and this are mutually exclusive instrumentation
+# schemes, so this is a separate option, not layered on top of ENABLE_COVERAGE.
+option(ENABLE_LLVM_COVERAGE "Enable Clang source-based coverage instrumentation for the jcef target (fork-safe alternative to ENABLE_COVERAGE's gcov)" OFF)
+if(ENABLE_LLVM_COVERAGE AND NOT CMAKE_SYSTEM_NAME STREQUAL "Windows")
+  if(NOT CMAKE_BUILD_TYPE STREQUAL "Debug")
+    message(WARNING "ENABLE_LLVM_COVERAGE set -- forcing Debug build for coverage correctness")
+    set(CMAKE_BUILD_TYPE "Debug" CACHE STRING "" FORCE)
+  endif()
+  if(NOT CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
+    message(FATAL_ERROR "ENABLE_LLVM_COVERAGE requires clang: pass -DCMAKE_C_COMPILER=clang-14 -DCMAKE_CXX_COMPILER=clang++-14 (or your platform's clang) at configure time")
+  endif()
+endif()
+
+# AddressSanitizer instrumentation for the jcef target (native/*.cpp only, not the
+# vendored libcef_dll_wrapper/libcef.so -- those aren't built with ASan, so this can
+# only catch bad memory accesses that originate in this repo's own native/ code, not
+# inside CEF itself). Linux/GCC-Clang only; not supported on Windows here. Meant as
+# a one-off debugging build (run a small, targeted repro under it), not for routine
+# use -- ASan roughly doubles memory use and slows execution noticeably, and its
+# runtime (libasan) generally needs to be first in the process via LD_PRELOAD.
+option(ENABLE_ASAN "Enable AddressSanitizer instrumentation for the jcef target" OFF)
+if(ENABLE_ASAN AND NOT CMAKE_SYSTEM_NAME STREQUAL "Windows")
+  if(NOT CMAKE_BUILD_TYPE STREQUAL "Debug")
+    message(WARNING "ENABLE_ASAN set -- forcing Debug build")
+    set(CMAKE_BUILD_TYPE "Debug" CACHE STRING "" FORCE)
+  endif()
+endif()
+
 # Use folders in the resulting project files.
 set_property(GLOBAL PROPERTY OS_FOLDERS ON)
 

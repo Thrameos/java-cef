@@ -2,13 +2,23 @@
 // reserved. Use of this source code is governed by a BSD-style license that
 // can be found in the LICENSE file.
 
-// Only compiled into the build when ENABLE_COVERAGE is on (see
-// native/CMakeLists.txt) -- test/CI infrastructure only, not part of any normal
-// build or the public API. See java-cef#4 / plan/findings.md: CEF's native
-// shutdown reliably crashes in Debug builds (which coverage instrumentation
-// requires), before gcov's exit-time flush can run. Explicitly flushing here, right
-// before that known-crashing shutdown call, lets CI still collect real coverage
-// data for everything that ran up to that point instead of losing it entirely.
+// Only compiled into the build when ENABLE_COVERAGE or ENABLE_LLVM_COVERAGE is
+// on (see native/CMakeLists.txt) -- test/CI infrastructure only, not part of
+// any normal build or the public API. See java-cef#4 / plan/findings.md: CEF's
+// native shutdown reliably crashes in Debug builds (which coverage
+// instrumentation requires), before the coverage runtime's own exit-time flush
+// can run. Explicitly flushing here, right before that known-crashing shutdown
+// call, lets CI still collect real coverage data for everything that ran up to
+// that point instead of losing it entirely.
+//
+// JCEF_LLVM_COVERAGE (set by native/CMakeLists.txt when ENABLE_LLVM_COVERAGE
+// is on) selects Clang's source-based coverage runtime (__llvm_profile_write_
+// file) instead of gcov's (__gcov_dump) -- see CMakeLists.txt's
+// ENABLE_LLVM_COVERAGE option comment for why the two are mutually exclusive
+// (gcov's .gcda writer is not multi-process-safe against CEF's zygote-style
+// fork()s; Clang's per-process raw profile files, one per PID via
+// LLVM_PROFILE_FILE's %p pattern, sidestep that -- the same fix Chromium's own
+// coverage builds use).
 
 #include <jni.h>
 
@@ -16,11 +26,17 @@
 #include <cstdlib>
 #include <cstring>
 
+#if defined(JCEF_LLVM_COVERAGE)
+extern "C" int __llvm_profile_write_file(void);
+#define JCEF_COVERAGE_DUMP() __llvm_profile_write_file()
+#else
 extern "C" void __gcov_dump(void);
+#define JCEF_COVERAGE_DUMP() __gcov_dump()
+#endif
 
 extern "C" JNIEXPORT void JNICALL
 Java_tests_junittests_CoverageTestHelper_N_1FlushCoverage(JNIEnv*, jclass) {
-  __gcov_dump();
+  JCEF_COVERAGE_DUMP();
 }
 
 namespace {
@@ -56,7 +72,7 @@ namespace {
 struct sigaction g_previous_action[NSIG];
 
 void FlushCoverageOnCrash(int signum, siginfo_t* info, void* context) {
-  __gcov_dump();
+  JCEF_COVERAGE_DUMP();
 
   struct sigaction& previous = g_previous_action[signum];
   if (previous.sa_flags & SA_SIGINFO) {
