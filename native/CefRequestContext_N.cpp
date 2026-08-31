@@ -4,13 +4,18 @@
 
 #include "CefRequestContext_N.h"
 #include "include/cef_request_context.h"
+#include "jcef_ref_ptr.h"
 #include "jni_util.h"
 #include "request_context_handler.h"
 
 JNIEXPORT jobject JNICALL
 Java_org_cef_browser_CefRequestContext_1N_N_1GetGlobalContext(JNIEnv* env,
                                                               jclass cls) {
-  CefRefPtr<CefRequestContext> context = CefRequestContext::GetGlobalContext();
+  // Traced (JCefRefPtr, not plain CefRefPtr) -- this is the exact object at
+  // the center of #4/#23's mechanism-1 fix (CefRequestContext_N.java's
+  // getGlobalContextNative() cache) and a plausible site for mechanism 2
+  // too. See native/jcef_ref_ptr.h / issue_4_23_mental_model memory.
+  JCefRefPtr<CefRequestContext> context = CefRequestContext::GetGlobalContext();
   if (!context.get())
     return nullptr;
 

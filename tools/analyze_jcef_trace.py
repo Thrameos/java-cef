@@ -61,9 +61,15 @@ CRASH_MARKERS = (
 
 # (acquire_kind, release_kind, label)
 PAIRS = [
-    ("CEF_ADDREF", "CEF_RELEASE", "CEF ref-counted object (AddRef/Release)"),
+    ("CEF_ADDREF", "CEF_RELEASE",
+     "CEF ref-counted object via SetCefForJNIObjectHelper (JNI-wrapper "
+     "association only, NOT every CefRefPtr<T> -- see CEF_REFPTR_* below)"),
     ("JNI_GREF_NEW", "JNI_GREF_DEL", "JNI global reference"),
     ("JNI_LREF_NEW", "JNI_LREF_DEL", "JNI local reference (ScopedJNIBase-owned)"),
+    ("CEF_REFPTR_ADDREF", "CEF_REFPTR_RELEASE",
+     "CefRefPtr<T> usage traced via JCefRefPtr<T> (native/jcef_ref_ptr.h) "
+     "-- only wherever a call site opted in, not every CefRefPtr<T> in the "
+     "codebase"),
 ]
 
 
