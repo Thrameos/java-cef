@@ -8,7 +8,6 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.cef.browser.CefBrowser;
 import org.cef.handler.CefDisplayHandlerAdapter;
-import org.junit.jupiter.api.Disabled;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 
@@ -16,19 +15,15 @@ import java.awt.Component;
 import java.awt.event.MouseWheelEvent;
 import java.util.concurrent.TimeUnit;
 
-// Regression test for upstream chromiumembedded/java-cef#26: mouse wheel
-// direction is inverted in OSR mode. native/CefBrowser_N.cpp's
-// N_SendMouseWheelEvent passes the raw AWT MouseWheelEvent.getWheelRotation()
-// value straight through as CEF's deltaY with no sign adjustment:
-//   double deltaX = 0, deltaY = 0;
-//   if (cef_event.modifiers & EVENTFLAG_SHIFT_DOWN) deltaX = delta; else deltaY = delta;
-//   browser->GetHost()->SendMouseWheelEvent(cef_event, deltaX, deltaY);
-// AWT's convention (positive wheelRotation = wheel rotated away from the
-// user, the typical "scroll down" gesture) is the opposite sign of what
-// Chromium's CefMouseEvent deltaY convention expects for the same gesture --
-// still an open upstream report as of this session, with reproductions
-// posted as recent as CEF 90+, and a one-line community-proposed fix
-// (negate the rotation) never merged.
+// Regression test for upstream chromiumembedded/java-cef#26 / this repo's
+// #14: mouse wheel direction was inverted in OSR mode.
+// native/CefBrowser_N.cpp's N_SendMouseWheelEvent used to pass the raw AWT
+// MouseWheelEvent.getWheelRotation() value straight through as CEF's deltaY
+// with no sign adjustment. AWT's convention (positive wheelRotation = wheel
+// rotated away from the user, the typical "scroll down" gesture) is the
+// opposite sign of what Chromium's CefMouseEvent deltaY convention expects
+// for the same gesture. Fixed by negating delta before assigning it to
+// deltaX/deltaY.
 //
 // Uses the same synthetic-AWT-event-dispatch technique already proven to
 // work in CefKeyboardHandlerTest (unlike the mouse *click*/context-menu
@@ -37,11 +32,6 @@ import java.util.concurrent.TimeUnit;
 // via JS, then dispatches a synthetic wheel event with a positive
 // getWheelRotation() (AWT's "scroll down" convention) and confirms
 // window.scrollY increased rather than decreased.
-//
-// @Disabled until the bug is fixed -- confirmed by running this test
-// un-@Disabled that it currently fails (the page scrolls the wrong way).
-@Disabled("Known bug: OSR mouse wheel direction is inverted -- see "
-        + "Thrameos/java-cef#14 (upstream chromiumembedded/java-cef#26)")
 @ExtendWith(TestSetupExtension.class)
 class UpstreamIssue26Test {
     private static final String TEST_URL = "http://test.com/upstream_issue_26.html";
