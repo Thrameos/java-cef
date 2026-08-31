@@ -74,6 +74,14 @@ Java_org_cef_network_CefPostDataElement_1N_N_1SetToBytes(JNIEnv* env,
   if (!dataElement)
     return;
 
+  // |jsize| is a signed jint that gets passed straight into
+  // CefPostDataElement::SetToBytes()'s unsigned size_t parameter -- a
+  // negative value implicitly converts to a huge unsigned size, causing a
+  // buffer over-read/crash. Also reject a size larger than the actual array,
+  // which would read past the end of |jbytes|. See Thrameos/java-cef#19.
+  if (jsize < 0 || jsize > env->GetArrayLength(jbytes))
+    return;
+
   jbyte* jbyte = env->GetByteArrayElements(jbytes, nullptr);
   if (!jbyte)
     return;

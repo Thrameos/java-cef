@@ -70,7 +70,12 @@ Java_org_cef_network_CefRequest_1N_N_1SetURL(JNIEnv* env,
   CefRefPtr<CefRequest> request = GetSelf(self);
   if (!request)
     return;
-  request->SetURL(GetJNIString(env, jurl));
+  // CEF's own CHECK(!url.empty()) aborts the Debug/coverage build (silently
+  // permitted in Release) on an empty URL. See Thrameos/java-cef#21.
+  CefString url = GetJNIString(env, jurl);
+  if (url.empty())
+    return;
+  request->SetURL(url);
 }
 
 JNIEXPORT void JNICALL
@@ -257,8 +262,13 @@ Java_org_cef_network_CefRequest_1N_N_1SetHeaderByName(JNIEnv* env,
   CefRefPtr<CefRequest> request = GetSelf(self);
   if (!request)
     return;
-  return request->SetHeaderByName(GetJNIString(env, jname),
-                                  GetJNIString(env, jvalue),
+  // CEF's own CHECK(!name.empty()) aborts the Debug/coverage build
+  // (silently permitted in Release) on an empty header name. See
+  // Thrameos/java-cef#20.
+  CefString name = GetJNIString(env, jname);
+  if (name.empty())
+    return;
+  return request->SetHeaderByName(name, GetJNIString(env, jvalue),
                                   joverride != JNI_FALSE);
 }
 

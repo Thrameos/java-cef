@@ -11,7 +11,6 @@ import org.cef.network.CefCookieManager;
 import org.cef.network.CefPostDataElement;
 import org.cef.network.CefRequest;
 import org.cef.network.CefResponse;
-import org.junit.jupiter.api.Disabled;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 
@@ -31,18 +30,12 @@ class MalformedInputEdgeCaseTest {
         element.dispose();
     }
 
-    // @Disabled -- IMPORTANT: this is a real, silent (no FATAL/DCHECK output
-    // at all, unlike every other crash found this session) segfault, root-
-    // caused to a signed/unsigned integer bug: native/CefPostDataElement_N.
-    // cpp passes the jint |size| straight into CefPostDataElement::
+    // Regression test for Thrameos/java-cef#19: native/CefPostDataElement_N.
+    // cpp used to pass the jint |size| straight into CefPostDataElement::
     // SetToBytes(), whose C++ signature takes a size_t -- a negative jint
-    // implicitly becomes a huge unsigned value, causing a massive buffer
-    // over-read. Filed as Thrameos/java-cef#19. Do not remove @Disabled
-    // without a fix; run only under a hard external timeout wrapper if
-    // investigating further, since this crash gives no diagnostic to work
-    // from otherwise.
-    @Disabled("Real silent segfault (signed/unsigned integer bug in "
-            + "CefPostDataElement.setToBytes()) -- see Thrameos/java-cef#19")
+    // implicitly became a huge unsigned value, causing a silent segfault
+    // (buffer over-read). Fixed by rejecting a negative (or too-large) size
+    // in the JNI shim before it reaches CEF.
     @Test
     void postDataElementSetToBytesWithNegativeSizeDoesNotThrow() {
         CefPostDataElement element = CefPostDataElement.create();
@@ -92,16 +85,11 @@ class MalformedInputEdgeCaseTest {
         request.dispose();
     }
 
-    // @Disabled -- IMPORTANT: a real crash, but Debug/coverage-build-only
-    // (same class of issue as #20 -- confirmed does NOT reproduce in
-    // Release): CEF's own bundled binary distribution has a
-    // CHECK(!url.empty()) in request_ctocpp.cc:75 that
-    // native/CefRequest_N.cpp's N_SetURL does nothing to guard against.
-    // Filed as Thrameos/java-cef#21. Also crashed early enough to prevent
-    // CoverageTestHelper.flush() from running, losing an entire coverage-
-    // measurement run's .gcda data -- same lesson as #20.
-    @Disabled("Real crash (CEF's own CHECK(!url.empty())), Debug/coverage-"
-            + "build-only -- see Thrameos/java-cef#21")
+    // Regression test for Thrameos/java-cef#21: CEF's own bundled binary
+    // distribution has a CHECK(!url.empty()) in request_ctocpp.cc:75
+    // (Debug/coverage-build-only -- silently permitted in Release) that
+    // native/CefRequest_N.cpp's N_SetURL used to do nothing to guard
+    // against. Fixed by rejecting an empty URL in the JNI shim.
     @Test
     void requestSetURLWithEmptyStringDoesNotThrow() {
         CefRequest request = CefRequest.create();
@@ -118,18 +106,12 @@ class MalformedInputEdgeCaseTest {
         request.dispose();
     }
 
-    // @Disabled -- IMPORTANT: a real crash, but Debug/coverage-build-only
-    // (confirmed does NOT reproduce in Release): CEF's own bundled binary
-    // distribution has a CHECK(!name.empty()) in request_ctocpp.cc that
-    // native/CefRequest_N.cpp's N_SetHeaderByName does nothing to guard
-    // against on the JCEF side. Filed as Thrameos/java-cef#20. This one also
-    // crashed early enough to prevent CoverageTestHelper.flush() from
-    // running, losing an entire coverage-measurement run's .gcda data --
-    // exclude this class by name from any future ENABLE_COVERAGE run until
-    // fixed, the same way CefPrintSettingsTest/CefRequestContextTest/
-    // CefPostDataTest/CefBrowserApiTest already are (see plan/roadmap.md).
-    @Disabled("Real crash (CEF's own CHECK(!name.empty())), Debug/coverage-"
-            + "build-only -- see Thrameos/java-cef#20")
+    // Regression test for Thrameos/java-cef#20: CEF's own bundled binary
+    // distribution has a CHECK(!name.empty()) in request_ctocpp.cc
+    // (Debug/coverage-build-only -- silently permitted in Release) that
+    // native/CefRequest_N.cpp's N_SetHeaderByName used to do nothing to
+    // guard against. Fixed by rejecting an empty header name in the JNI
+    // shim.
     @Test
     void requestSetHeaderByNameWithEmptyNameDoesNotThrow() {
         CefRequest request = CefRequest.create();
