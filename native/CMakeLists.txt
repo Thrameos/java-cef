@@ -177,7 +177,7 @@ set(JCEF_SRCS_WINDOWS
 # part of normal builds at all -- only added to the target when ENABLE_COVERAGE is
 # on, so it can't affect non-coverage builds (no dead code path, no link-time
 # dependency on __gcov_dump when the target isn't compiled with --coverage).
-if(ENABLE_COVERAGE)
+if(ENABLE_COVERAGE OR ENABLE_LLVM_COVERAGE)
   list(APPEND JCEF_SRCS CoverageTestHelper.cpp)
 endif()
 
@@ -467,6 +467,19 @@ endif()
 if(ENABLE_COVERAGE AND NOT OS_WINDOWS)
   target_compile_options(${JCEF_TARGET} PRIVATE --coverage -O0)
   target_link_options(${JCEF_TARGET} PRIVATE --coverage)
+endif()
+
+# See CMakeLists.txt's ENABLE_LLVM_COVERAGE option.
+if(ENABLE_LLVM_COVERAGE AND NOT OS_WINDOWS)
+  target_compile_options(${JCEF_TARGET} PRIVATE -fprofile-instr-generate -fcoverage-mapping -O0 -g)
+  target_link_options(${JCEF_TARGET} PRIVATE -fprofile-instr-generate -fcoverage-mapping)
+  target_compile_definitions(${JCEF_TARGET} PRIVATE JCEF_LLVM_COVERAGE)
+endif()
+
+# See CMakeLists.txt's ENABLE_ASAN option.
+if(ENABLE_ASAN AND NOT OS_WINDOWS)
+  target_compile_options(${JCEF_TARGET} PRIVATE -fsanitize=address -fno-omit-frame-pointer -g -O0)
+  target_link_options(${JCEF_TARGET} PRIVATE -fsanitize=address)
 endif()
 
 # See CMakeLists.txt's JCEF_ENABLE_TRACE option / native/jcef_trace.h.
