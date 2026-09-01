@@ -31,11 +31,32 @@
 // native/life_span_handler.cpp's OnBeforeClose handling next.
 
 #include <atomic>
+#include <chrono>
+#include <cstdlib>
 #include <iostream>
+#include <string>
+#include <thread>
+#include <vector>
 
 #include "include/cef_app.h"
 #include "include/cef_browser.h"
 #include "include/cef_client.h"
+
+// NULL_PARAM_REPRO-style env-var control (see tools_native/null_param_repro
+// for why an env var, not argv -- CEF's own CefMainArgs/CommandLine::Init
+// mutates argv). ISSUE10_REPRO_MODE:
+//   (unset)      -- baseline: everything on the process's initial thread.
+//   "thread"     -- CefInitialize/pump/CreateBrowser/CefShutdown all run on
+//                   a single spawned std::thread instead (tests "does it
+//                   need to not be the process's initial thread").
+//   "busythreads"-- like "thread", but N idle background threads (default
+//                   24, ISSUE10_REPRO_NUM_THREADS to override) are spawned
+//                   first and held alive for the whole run, each doing
+//                   small periodic heap churn -- tests "does it need a
+//                   many-threads glibc malloc-arena layout specifically",
+//                   the leading untested hypothesis per this session's
+//                   writeup (real JCEF runs inside a JVM process with
+//                   20-30+ other threads; this repro alone never has).
 
 namespace {
 
@@ -97,16 +118,23 @@ void PumpUntil(std::atomic<bool>& done, int timeout_ms) {
   }
 }
 
-}  // namespace
-
-int main(int argc, char* argv[]) {
-  CefMainArgs main_args(argc, argv);
-
-  int exit_code = CefExecuteProcess(main_args, nullptr, nullptr);
-  if (exit_code >= 0) {
-    return exit_code;
+// Idle background thread for "busythreads" mode -- never touches any CEF
+// API (so it cannot violate CEF's single-UI-thread contract), just churns
+// small heap allocations periodically to keep glibc's per-thread arena for
+// this thread active for the run's duration.
+std::atomic<bool> g_stop_busy_threads{false};
+void BusyThreadLoop() {
+  while (!g_stop_busy_threads) {
+    std::vector<char> junk(4096);
+    for (auto& c : junk) c = 0;
+    std::this_thread::sleep_for(std::chrono::milliseconds(5));
   }
+}
 
+// The actual scenario -- every CEF UI-thread-affine call in here must run
+// on the SAME thread, whichever thread calls this function. Returns the
+// process exit code.
+int RunScenario(CefMainArgs& main_args) {
   CefSettings settings;
   settings.no_sandbox = true;
   settings.windowless_rendering_enabled = true;
@@ -188,4 +216,56 @@ int main(int argc, char* argv[]) {
   std::cout << "SURVIVED: CefShutdown() returned\n";
 
   return 0;
+}
+
+}  // namespace
+
+int main(int argc, char* argv[]) {
+  CefMainArgs main_args(argc, argv);
+
+  // Subprocess re-exec check must happen on this thread (whichever thread
+  // owns process startup) before any mode dispatch -- matches every other
+  // repro/example's structure, not mode-specific.
+  int exit_code = CefExecuteProcess(main_args, nullptr, nullptr);
+  if (exit_code >= 0) {
+    return exit_code;
+  }
+
+  const char* mode = getenv("ISSUE10_REPRO_MODE");
+  if (!mode || std::string(mode).empty()) {
+    std::cout << "mode: baseline (main thread)\n";
+    return RunScenario(main_args);
+  }
+
+  std::vector<std::thread> busy_threads;
+  if (std::string(mode) == "busythreads") {
+    int n = 24;
+    if (const char* n_str = getenv("ISSUE10_REPRO_NUM_THREADS")) {
+      n = atoi(n_str);
+    }
+    std::cout << "mode: busythreads (" << n << " idle threads + 1 CEF thread)\n";
+    for (int i = 0; i < n; ++i) {
+      busy_threads.emplace_back(BusyThreadLoop);
+    }
+  } else if (std::string(mode) == "thread") {
+    std::cout << "mode: thread (single spawned thread for all CEF calls)\n";
+  } else {
+    std::cerr << "Unknown ISSUE10_REPRO_MODE: " << mode << "\n";
+    return 2;
+  }
+
+  // Every CEF UI-thread-affine call (CefInitialize/DoMessageLoopWork/
+  // CreateBrowser/CloseBrowser/CefShutdown) happens inside RunScenario(),
+  // consistently on THIS one spawned thread -- matching CEF's real
+  // contract (one consistent thread, not necessarily the process's main
+  // thread -- exactly how real JCEF uses AWT-EventQueue-0, never the JVM's
+  // actual main thread). main() itself never touches CEF again after this.
+  int result = 0;
+  std::thread cef_thread([&] { result = RunScenario(main_args); });
+  cef_thread.join();
+
+  g_stop_busy_threads = true;
+  for (auto& t : busy_threads) t.join();
+
+  return result;
 }
