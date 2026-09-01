@@ -472,8 +472,21 @@ public class CefClient extends CefClientHandler
     public void onGotFocus(CefBrowser browser) {
         if (browser == null) return;
 
-        focusedBrowser_ = browser;
-        browser.setFocus(true);
+        // browser.setFocus(true) below is CEF's OnSetFocus() path, which
+        // synchronously re-notifies WebContents focus (OnWebContentsFocused)
+        // and so re-enters this same onGotFocus() callback for the same
+        // browser -- unlike CEF's own OnSetFocus() callback, which guards
+        // itself against reentrant SetFocus() calls (is_in_onsetfocus_ in
+        // CefBrowserContentsDelegate), OnGotFocus/OnWebContentsFocused has
+        // no such guard. Without this check, an already-focused browser
+        // recurses onGotFocus<->setFocus(true) synchronously until the
+        // thread's stack overflows. Only call setFocus() on an actual
+        // focus transition (guarded by focusedBrowser_, cleared in
+        // onTakeFocus() below).
+        if (focusedBrowser_ != browser) {
+            focusedBrowser_ = browser;
+            browser.setFocus(true);
+        }
         if (focusHandler_ != null) focusHandler_.onGotFocus(browser);
     }
 
