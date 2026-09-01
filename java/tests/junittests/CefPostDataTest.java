@@ -12,7 +12,6 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import org.cef.network.CefPostData;
 import org.cef.network.CefPostDataElement;
 import org.cef.network.CefPostDataElement.Type;
-import org.junit.jupiter.api.Disabled;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 
@@ -70,24 +69,15 @@ class CefPostDataTest {
         element.dispose();
     }
 
-    // CORRECTION (2026-08-30, coverage-stabilization session): the claim below
-    // ("no-ops... confirmed here") does not hold -- verified deterministically
-    // that this actually hits a real, unconditional CEF CHECK() in the Debug/
-    // coverage build: FATAL:.../post_data_element_ctocpp.cc:69] Check failed:
-    // !fileName.empty(). Same bug class as the already-documented issues
-    // #19/#20/#21 (CEF's own CHECK() firing on empty-string input instead of
-    // gracefully no-op'ing). Disabled per this project's standing strategy
-    // rather than trusted on unverified prior-session say-so -- see
-    // [[coverage_strategy_port_ceftests]] user memory.
-    @Disabled("Real CEF CHECK() failure on empty file name (post_data_element_"
-            + "ctocpp.cc:69), not a graceful no-op as the old comment claimed -- "
-            + "see method comment")
+    // FIXED (issue #28, same bug class as #19/#20/#21): CEF's own
+    // post_data_element_ctocpp.cc had an unconditional CHECK(!fileName.empty())
+    // in the Debug/coverage build -- native/CefPostDataElement_N.cpp's
+    // N_SetToFile now guards against an empty file name before calling into
+    // CEF (matching the fix already applied for #20/#21's SetURL/
+    // SetHeaderByName), so an empty setToFile() call is now a genuine no-op
+    // that leaves the element untouched, as this test expects.
     @Test
     void elementSetToEmptyFilePathLeavesElementEmpty() {
-        // CEF's own CefPostDataElement::SetToFile() no-ops on an empty file name
-        // (confirmed here) rather than setting type PDE_TYPE_FILE with an empty
-        // path -- a real, useful-to-document edge case in the underlying CEF
-        // behavior, not a JCEF bug.
         CefPostDataElement element = CefPostDataElement.create();
         element.setToFile("");
         assertEquals(Type.PDE_TYPE_EMPTY, element.getType());

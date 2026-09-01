@@ -161,34 +161,35 @@ public class TestSetupExtension
 
         CefApp.getInstance(args, settings);
 
-        // Isolated single-target leak-sweep processes (see leak.cachePath
-        // above) can reach here having never created a real CefBrowser --
-        // unlike the ordinary full sweep, where an earlier target (the
-        // DevTools one) always creates one first. This turned out to
-        // matter: 7 of 9 non-control targets crashed (SIGTRAP inside
-        // libcef.so, confirmed via dmesg) when run as the very first real
-        // CEF call in such a process. A pure-C++ probe
-        // (tools_native/leak_probe/leak_probe.cc) makes the same calls
-        // (CefRequestContext::CreateContext() etc.) with no browser ever
-        // created and never crashes -- but it deliberately configures
-        // multi_threaded_message_loop=true, windowless_rendering_enabled=
-        // false, letting CEF drive its own native UI thread and pump its
-        // own message loop. This repo's real default (windowless_rendering_
-        // enabled=true, external_message_pump mode -- see CLAUDE.md) has no
-        // such thing: nothing but explicit doMessageLoopWork() calls (an
-        // app's ~30fps EDT Timer, normally) drives CEF's browser-process/
-        // IO-thread startup forward, and a manual pump loop tried here
-        // first wasn't enough to reach whatever state actually only
-        // finishes as a side effect of creating a browser. No real JCEF
-        // app calls CefRequestContext.createContext() before ever creating
-        // a browser anyway, so this isn't a synthetic workaround so much as
-        // restoring the one precondition every real caller already
-        // satisfies: create and close one throwaway real CefBrowser here so
-        // an isolated process reaches the same browser-process-ready state
-        // the full sweep always incidentally had by this point.
-        if (isolatedCachePath != null) {
-            warmUpBrowserProcess();
-        }
+        // Unconditional, not just for isolated leak-sweep processes (see
+        // leak.cachePath above, the case this warmup was originally written
+        // for) -- this is also GH issue #16: any *_N value-object's
+        // create() (CefPostDataElement, CefRequest, CefPrintSettings, ...)
+        // crashes with a native FATAL ("CppToC called with invalid version
+        // -1") if it's the first real CEF call in the process, with no
+        // browser ever created first. Confirmed via a pure-C++ repro
+        // (tools_native/leak_probe.cc/null_param_repro.cc) that the
+        // equivalent CEF calls DON'T crash there -- but that repro
+        // deliberately configures multi_threaded_message_loop=true,
+        // windowless_rendering_enabled=false, letting CEF drive its own
+        // native UI thread and pump its own message loop. This repo's real
+        // default (windowless_rendering_enabled=true, external_message_pump
+        // mode -- see CLAUDE.md) has no such thing: nothing but explicit
+        // doMessageLoopWork() calls (an app's ~30fps EDT Timer, normally)
+        // drives CEF's browser-process/IO-thread startup forward, and a
+        // manual pump loop alone isn't enough to reach whatever state only
+        // finishes as a side effect of creating a browser. No real JCEF app
+        // calls CefRequestContext.createContext()/CefPostDataElement.
+        // create()/etc. before ever creating a browser anyway, so this
+        // isn't a synthetic workaround so much as restoring the one
+        // precondition every real caller already satisfies -- and, since
+        // which test class happens to run first is otherwise an unstated,
+        // fragile dependency on JUnit5's default discovery order (see #16's
+        // own "how this was found" section), the only robust fix is to make
+        // every test run -- including a single class selected in isolation
+        // via --select-class -- start from that same precondition, not just
+        // the isolated leak-sweep case that happened to need it first.
+        warmUpBrowserProcess();
     }
 
     private static void warmUpBrowserProcess() {

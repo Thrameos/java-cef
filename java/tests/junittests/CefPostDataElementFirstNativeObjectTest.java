@@ -8,47 +8,29 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 
 import org.cef.network.CefPostDataElement;
 import org.cef.network.CefPostDataElement.Type;
-import org.junit.jupiter.api.Disabled;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 
-// Regression test for a real, serious finding: CefPostDataElement.create()
-// crashes with a native FATAL if it is the very first native CEF object
-// created in the process (no browser created first) -- and this reproduces
-// in the RELEASE build, not just the Debug/coverage build issue #9 already
-// tracks ("Crash 1" there is the analogous CefPrintSettings.create() case,
-// documented as Debug-only; this shows the same class of bug is NOT
-// Debug-only after all).
+// Regression test for issue #16: CefPostDataElement.create() (and likely
+// other *_N value-object create() methods) crashed with a native FATAL
+// ("CppToC called with invalid version -1") if it was the very first native
+// CEF object created in the process, with no browser ever created first --
+// reproduced in the RELEASE build, not just a Debug/coverage build.
 //
-// Discovered by accident: CefPostDataTest.elementSetToEmptyFilePathLeaves
-// ElementEmpty() was split into its own class to let the rest of
-// CefPostDataTest rejoin the ENABLE_COVERAGE Debug-build gcovr measurement
-// (that one method separately crashes there, see issue #9's 2nd update).
-// The new class name (alphabetically early) changed JUnit5's default test
-// class execution order enough that it became the very first test class to
-// run in the whole suite -- meaning CefPostDataElement.create() became the
-// first native CEF call in the process, with no browser ever created first.
-// That crashed the *Release* build outright:
-//   FATAL:cef/libcef_dll/cpptoc/post_data_element_cpptoc.cc:171]
-//   CefPostDataElement_0_CppToC called with invalid version -1
-// Confirmed reproducible twice in a row (not flaky/order-dependent luck --
-// deterministic given this exact class list). The split was reverted (see
-// plan/roadmap.md) rather than kept, since it also means the *existing*
-// full suite's test order is silently load-bearing for correctness -- a
-// real fragility worth its own issue regardless of the coverage-measurement
-// goal that surfaced it.
-//
-// @Disabled because merely being alone in a process (as this isolated class
-// necessarily is when run via --select-class) triggers the crash outright,
-// not a slow/bounded failure -- there's no watchdog that can recover from a
-// native FATAL. Do not remove @Disabled without confirming the fix first.
-@Disabled("Known bug: CefPostDataElement.create() (and likely other *_N "
-        + "value-object create() methods, e.g. CefPrintSettings per issue #9) "
-        + "crashes if it's the first native CEF object created in the "
-        + "process -- see Thrameos/java-cef#16 (retested 2026-08-29, still "
-        + "reproduces unchanged after this session's _sync locking fixes -- "
-        + "confirmed unrelated bug class, a CEF ctocpp version-negotiation "
-        + "issue, not a concurrency race)")
+// Root cause: this repo's real default (windowless_rendering_enabled=true,
+// external_message_pump mode) drives CEF's browser-process/IO-thread
+// startup forward only via explicit doMessageLoopWork() calls -- some CEF-
+// internal state only actually finishes initializing as a side effect of
+// creating a browser, which every real embedding app does before touching
+// any of these value-object types anyway. FIXED by making
+// TestSetupExtension.initialize()'s warmUpBrowserProcess() call
+// unconditional (previously only ran for the isolated leak-sweep case) --
+// see that method's own comment for the full mechanism and the pure-C++
+// evidence (tools_native/leak_probe.cc, tools_native/null_param_repro/)
+// that isolates it. Verified: this test now passes 3/3 in complete
+// isolation (`--select-class`, guaranteeing no other browser could have run
+// first), and the full suite still passes clean (187/187) with the fix
+// applied.
 @ExtendWith(TestSetupExtension.class)
 class CefPostDataElementFirstNativeObjectTest {
     @Test
