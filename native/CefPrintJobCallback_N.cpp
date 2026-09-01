@@ -4,6 +4,7 @@
 
 #include "CefPrintJobCallback_N.h"
 #include "jni_scoped_helpers.h"
+#include "jni_util.h"
 
 #include "include/cef_print_handler.h"
 
@@ -25,6 +26,9 @@ JNIEXPORT void JNICALL
 Java_org_cef_callback_CefPrintJobCallback_1N_N_1Continue(JNIEnv* env,
                                                          jobject obj,
                                                          jlong self) {
+  // See jni_util.h's JNI_REQUIRE_CEF_ALIVE_OR_RETURN comment -- reachable
+  // from CefPrintJobCallback_N.java's finalize().
+  JNI_REQUIRE_CEF_ALIVE_OR_RETURN();
   CefRefPtr<CefPrintJobCallback> callback = GetSelf(self);
   if (!callback)
     return;

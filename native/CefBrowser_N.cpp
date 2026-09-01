@@ -12,6 +12,7 @@
 
 #include "browser_process_handler.h"
 #include "client_handler.h"
+#include "context.h"
 #include "critical_wait.h"
 #include "devtools_message_observer.h"
 #include "int_callback.h"
@@ -1497,6 +1498,14 @@ JNIEXPORT void JNICALL
 Java_org_cef_browser_CefBrowser_1N_N_1Close(JNIEnv* env,
                                             jobject obj,
                                             jboolean force) {
+  // Liveness guard against issue #10/#4/#23's family -- see
+  // JNI_REQUIRE_CEF_ALIVE_OR_RETURN's own comment (jni_util.h).
+  // CefBrowser_N.java's finalize() calls close(true) -> here; confirmed via
+  // tools_native/issue10_repro's ISSUE10_REPRO_LATE_CLOSE mode that calling
+  // this exact native path (GetHost()->CloseBrowser()) on a browser left
+  // open at CefShutdown() time is a real, reproducible trigger for the
+  // browser_context.cc:44 DCHECK.
+  JNI_REQUIRE_CEF_ALIVE_OR_RETURN();
   CefRefPtr<CefBrowser> browser = JNI_GET_BROWSER_OR_RETURN(env, obj);
   JCEF_TRACE("CefBrowser_N::N_Close() ENTER browser_id=%d force=%d osr=%d",
              browser->GetIdentifier(), force != JNI_FALSE,

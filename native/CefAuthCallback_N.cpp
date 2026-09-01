@@ -37,6 +37,9 @@ JNIEXPORT void JNICALL
 Java_org_cef_callback_CefAuthCallback_1N_N_1Cancel(JNIEnv* env,
                                                    jobject obj,
                                                    jlong self) {
+  // See jni_util.h's JNI_REQUIRE_CEF_ALIVE_OR_RETURN comment -- reachable
+  // from CefAuthCallback_N.java's finalize().
+  JNI_REQUIRE_CEF_ALIVE_OR_RETURN();
   CefRefPtr<CefAuthCallback> callback = GetSelf(self);
   if (!callback)
     return;
