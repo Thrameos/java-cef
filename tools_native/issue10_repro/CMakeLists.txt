@@ -12,6 +12,15 @@ add_executable(${ISSUE10_REPRO_TARGET} issue10_repro.cc)
 SET_EXECUTABLE_TARGET_PROPERTIES(${ISSUE10_REPRO_TARGET})
 add_dependencies(${ISSUE10_REPRO_TARGET} libcef_dll_wrapper)
 target_link_libraries(${ISSUE10_REPRO_TARGET} libcef_lib libcef_dll_wrapper ${CEF_STANDARD_LIBS})
+target_include_directories(${ISSUE10_REPRO_TARGET} PRIVATE ${CMAKE_SOURCE_DIR}/native)
+
+# Same JCEF_TRACE() facility libjcef.so itself uses (native/jcef_trace.h) --
+# see CMakeLists.txt's JCEF_ENABLE_TRACE option -- so this repro's trace
+# output can be directly diffed against a real JCEF trace, same format,
+# same macro, same env var (JCEF_TRACE=1) to enable at runtime.
+if(JCEF_ENABLE_TRACE)
+  target_compile_definitions(${ISSUE10_REPRO_TARGET} PRIVATE JCEF_ENABLE_TRACE)
+endif()
 
 set_target_properties(${ISSUE10_REPRO_TARGET} PROPERTIES INSTALL_RPATH "$ORIGIN")
 set_target_properties(${ISSUE10_REPRO_TARGET} PROPERTIES BUILD_WITH_INSTALL_RPATH TRUE)

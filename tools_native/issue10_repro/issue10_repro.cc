@@ -42,6 +42,14 @@
 #include "include/cef_browser.h"
 #include "include/cef_client.h"
 
+// Same facility libjcef.so itself uses -- see this repro's own CMakeLists.txt
+// for how JCEF_ENABLE_TRACE gets defined here too. Trace strings below are
+// deliberately worded to match native/context.cpp's/life_span_handler.cpp's/
+// client_handler.cpp's real trace points exactly (see comments at each call
+// site), so a real JCEF trace and this repro's trace can be diffed directly
+// line-for-line at the points that exist in both.
+#include "jcef_trace.h"
+
 // NULL_PARAM_REPRO-style env-var control (see tools_native/null_param_repro
 // for why an env var, not argv -- CEF's own CefMainArgs/CommandLine::Init
 // mutates argv). ISSUE10_REPRO_MODE:
@@ -59,6 +67,22 @@
 //                   20-30+ other threads; this repro alone never has).
 
 namespace {
+
+// Matches native/context.cpp's OnContextInitialized() trace point exactly
+// (that one fires from Context, a CefBrowserProcessHandler subclass's own
+// OnContextInitialized -- see native/browser_process_handler.cpp).
+class MinimalApp : public CefApp, public CefBrowserProcessHandler {
+ public:
+  CefRefPtr<CefBrowserProcessHandler> GetBrowserProcessHandler() override {
+    return this;
+  }
+  void OnContextInitialized() override {
+    JCEF_TRACE("OnContextInitialized() ENTER");
+    JCEF_TRACE("OnContextInitialized() EXIT");
+  }
+
+  IMPLEMENT_REFCOUNTING(MinimalApp);
+};
 
 class MinimalRenderHandler : public CefRenderHandler {
  public:
@@ -90,13 +114,25 @@ class MinimalClient : public CefClient, public CefLifeSpanHandler {
   CefRefPtr<CefLifeSpanHandler> GetLifeSpanHandler() override { return this; }
 
   void OnAfterCreated(CefRefPtr<CefBrowser> b) override {
+    // Matches native/client_handler.cpp's + native/life_span_handler.cpp's
+    // real OnAfterCreated trace points exactly.
+    JCEF_TRACE("ClientHandler::OnAfterCreated() ENTER");
+    JCEF_TRACE("LifeSpanHandler::OnAfterCreated() ENTER browser_id=%d",
+               b->GetIdentifier());
     std::cout << "OnAfterCreated\n";
     browser = b;
     after_created = true;
   }
   void OnBeforeClose(CefRefPtr<CefBrowser> b) override {
+    // Matches native/client_handler.cpp's + native/life_span_handler.cpp's
+    // real OnBeforeClose trace points exactly.
+    JCEF_TRACE("ClientHandler::OnBeforeClose() ENTER");
+    JCEF_TRACE("LifeSpanHandler::OnBeforeClose() ENTER browser_id=%d",
+               b->GetIdentifier());
     std::cout << "OnBeforeClose\n";
     before_close = true;
+    JCEF_TRACE("LifeSpanHandler::OnBeforeClose() EXIT browser_id=%d",
+               b->GetIdentifier());
   }
 
  private:
@@ -105,12 +141,26 @@ class MinimalClient : public CefClient, public CefLifeSpanHandler {
   IMPLEMENT_REFCOUNTING(MinimalClient);
 };
 
+// Matches native/context.cpp's DoMessageLoopWork() exactly, including its
+// trace cadence (first 5 calls, then every 100th) -- a single shared call
+// counter across the whole process, same as Context's own static
+// call_count, so this repro's trace tail is directly comparable to a real
+// JCEF trace's DoMessageLoopWork() call-number progression.
+long long g_pump_call_count = 0;
+void Pump() {
+  ++g_pump_call_count;
+  if (g_pump_call_count <= 5 || g_pump_call_count % 100 == 0) {
+    JCEF_TRACE("DoMessageLoopWork() call #%lld", g_pump_call_count);
+  }
+  CefDoMessageLoopWork();
+}
+
 // Matches CefApp.java's ~30fps EDT Timer / Context::DoMessageLoopWork()'s
 // caller -- pump for up to |timeout_ms|, checking |done| after every pump.
 void PumpUntil(std::atomic<bool>& done, int timeout_ms) {
   int elapsed = 0;
   while (!done && elapsed < timeout_ms) {
-    CefDoMessageLoopWork();
+    Pump();
     usleep(10 * 1000);  // ~10ms between pumps, finer-grained than the real
                         // ~33ms Timer -- fine, just needs to be "external,
                         // repeated, bounded" like the real one.
@@ -142,18 +192,22 @@ int RunScenario(CefMainArgs& main_args) {
   // multi_threaded_message_loop left false (default) -- external pump mode,
   // matching native/context.cpp exactly.
 
-  if (!CefInitialize(main_args, settings, nullptr, nullptr)) {
+  CefRefPtr<MinimalApp> app = new MinimalApp();
+  JCEF_TRACE("Initialize() calling CefInitialize(), external_message_pump_=%d",
+             1);
+  if (!CefInitialize(main_args, settings, app.get(), nullptr)) {
     std::cerr << "CefInitialize failed, exit code " << CefGetExitCode()
               << "\n";
     return 1;
   }
+  JCEF_TRACE("Initialize() EXIT res=%d", 1);
   std::cout << "CefInitialize returned true\n";
 
   // A few pumps to let OnContextInitialized-driven setup (temp window, etc,
   // matching Context::OnContextInitialized()) settle before creating a
   // browser -- real embedding apps have UI-driven delay here for free.
   for (int i = 0; i < 20; ++i) {
-    CefDoMessageLoopWork();
+    Pump();
     usleep(10 * 1000);
   }
 
@@ -191,29 +245,71 @@ int RunScenario(CefMainArgs& main_args) {
   // settle shape loosely (no real page here, just letting async browser-
   // context setup finish, same rationale as that method's own comment).
   for (int i = 0; i < 100; ++i) {
-    CefDoMessageLoopWork();
+    Pump();
     usleep(10 * 1000);
   }
 
-  client->browser->GetHost()->CloseBrowser(true);
-  PumpUntil(client->before_close, 5000);
-  if (!client->before_close) {
-    std::cerr << "OnBeforeClose never fired within 5s\n";
-    return 1;
-  }
+  // ISSUE10_REPRO_LATE_CLOSE=1: per the user's direct suggestion (2026-08-31)
+  // -- don't wait for GC/finalizer timing at all, just directly simulate
+  // what CefBrowser_N.java's finalize() does (close(true), i.e.
+  // GetHost()->CloseBrowser(true)) on an object that was NEVER explicitly
+  // closed before shutdown, called AFTER CefShutdown() instead of before.
+  // This is exactly the shape of a finalizer firing late: the Java wrapper
+  // (here, just our own held CefRefPtr<CefBrowser>) was still reachable/
+  // alive right up until the JVM's own GC discretion decided to collect and
+  // finalize it -- if that happens to land after CefShutdown() has already
+  // torn down CEF's UI-thread/task-runner bookkeeping, this is the call
+  // that would touch it.
+  bool late_close = getenv("ISSUE10_REPRO_LATE_CLOSE") != nullptr;
+  CefRefPtr<CefBrowser> browser_ref;  // only populated/used in late_close mode
 
-  client->browser = nullptr;
+  if (!late_close) {
+    client->browser->GetHost()->CloseBrowser(true);
+    PumpUntil(client->before_close, 5000);
+    if (!client->before_close) {
+      std::cerr << "OnBeforeClose never fired within 5s\n";
+      return 1;
+    }
+    client->browser = nullptr;
+  } else {
+    browser_ref = client->browser;  // keep alive across shutdown, deliberately
+  }
   client = nullptr;
 
-  // Matches Context::Shutdown()'s exact sequence: 10x pump, then
-  // CefShutdown() with no further delay.
+  // Matches Context::Shutdown() exactly, including its trace points.
+  JCEF_TRACE("Shutdown() ENTER");
   for (int i = 0; i < 10; ++i) {
-    CefDoMessageLoopWork();
+    Pump();
   }
 
+  JCEF_TRACE("Shutdown() calling CefShutdown()...");
   std::cout << "Calling CefShutdown()...\n";
   CefShutdown();
+  JCEF_TRACE("Shutdown() CefShutdown() returned");
   std::cout << "SURVIVED: CefShutdown() returned\n";
+
+  if (late_close) {
+    std::cout << "Now calling CloseBrowser(true) AFTER CefShutdown() -- "
+                 "simulating a late finalizer...\n";
+    JCEF_TRACE(
+        "Repro: calling browser->GetHost()->CloseBrowser(true) AFTER "
+        "CefShutdown() (simulating a late CefBrowser_N.finalize())");
+    browser_ref->GetHost()->CloseBrowser(true);
+    JCEF_TRACE("Repro: post-shutdown CloseBrowser(true) returned");
+    std::cout << "SURVIVED: post-shutdown CloseBrowser(true) returned\n";
+    browser_ref = nullptr;
+  }
+
+  // Per the user's "free after shutdown" hypothesis (2026-08-31): the
+  // outstanding CefRefPtr<MinimalApp> `app` is still alive here and about
+  // to be destroyed by an ordinary C++ local-variable/static-destructor
+  // unwind as main() returns -- exactly the shape of "some reference
+  // outlives shutdown, then benignly gets cleared, causing an order
+  // problem." Trace its release explicitly so a hung/crashing destructor
+  // shows up in the trace tail rather than after it.
+  JCEF_TRACE("Repro: releasing CefRefPtr<MinimalApp> app after CefShutdown()");
+  app = nullptr;
+  JCEF_TRACE("Repro: app released, returning from RunScenario()");
 
   return 0;
 }
