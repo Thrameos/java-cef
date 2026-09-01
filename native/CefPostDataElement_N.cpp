@@ -61,7 +61,13 @@ Java_org_cef_network_CefPostDataElement_1N_N_1SetToFile(JNIEnv* env,
   CefRefPtr<CefPostDataElement> dataElement = GetSelf(self);
   if (!dataElement)
     return;
-  dataElement->SetToFile(GetJNIString(env, jfilename));
+  // CEF's own CHECK(!fileName.empty()) aborts the Debug/coverage build
+  // (silently permitted in Release) on an empty file name. See
+  // Thrameos/java-cef#20/#21 and CefRequest_N.cpp's matching guard.
+  CefString fileName = GetJNIString(env, jfilename);
+  if (fileName.empty())
+    return;
+  dataElement->SetToFile(fileName);
 }
 
 JNIEXPORT void JNICALL

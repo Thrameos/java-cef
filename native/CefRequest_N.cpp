@@ -209,7 +209,13 @@ Java_org_cef_network_CefRequest_1N_N_1SetMethod(JNIEnv* env,
   CefRefPtr<CefRequest> request = GetSelf(self);
   if (!request)
     return;
-  request->SetMethod(GetJNIString(env, jmethod));
+  // CEF's own CHECK(!method.empty()) aborts the Debug/coverage build
+  // (silently permitted in Release) on an empty method. See
+  // Thrameos/java-cef#21.
+  CefString method = GetJNIString(env, jmethod);
+  if (method.empty())
+    return;
+  request->SetMethod(method);
 }
 
 JNIEXPORT jobject JNICALL
@@ -319,8 +325,14 @@ Java_org_cef_network_CefRequest_1N_N_1Set(JNIEnv* env,
     postDataObj.SetHandle(jpostData, false /* should_delete */);
   }
 
-  request->Set(GetJNIString(env, jurl), GetJNIString(env, jmethod),
-               postDataObj.GetCefObject(), headerMap);
+  // CEF's own CHECK(!url.empty())/CHECK(!method.empty()) abort the Debug/
+  // coverage build (silently permitted in Release) on either being empty.
+  // See Thrameos/java-cef#21 and this file's other matching guards.
+  CefString url = GetJNIString(env, jurl);
+  CefString method = GetJNIString(env, jmethod);
+  if (url.empty() || method.empty())
+    return;
+  request->Set(url, method, postDataObj.GetCefObject(), headerMap);
 }
 
 JNIEXPORT jint JNICALL

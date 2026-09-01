@@ -14,7 +14,6 @@ import org.cef.network.CefCookieManager;
 import org.cef.network.CefPostDataElement;
 import org.cef.network.CefRequest;
 import org.cef.network.CefResponse;
-import org.junit.jupiter.api.Disabled;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 
@@ -29,24 +28,25 @@ import java.util.Date;
 // before calling into native, so a null argument here reaches these native
 // guards directly. Per the 85%-coverage goal's explicit "happy AND unhappy
 // paths" requirement -- this is exactly that.
+//
+// FIXED (issues #19/#20/#21's systemic class of bug): a null String argument
+// to one of the handful of CEF setters with an internal CHECK(!x.empty())
+// (SetHeaderByName's name, SetMethod, SetURL, SetToFile's fileName, Set()'s
+// url/method) used to marshal to an empty CefString() with no guard on the
+// JCEF side -- silently fine in a Release build (CEF's own generated
+// ctocpp wrapper already no-ops on empty after its DCHECK, which compiles
+// out), but a fatal abort in a Debug/ENABLE_COVERAGE build (DCHECK is real
+// there). Fixed by adding an empty-string guard in each of native/
+// CefRequest_N.cpp's N_SetMethod/N_Set, CefResponse_N.cpp's
+// N_SetHeaderByName, and CefPostDataElement_N.cpp's N_SetToFile -- matching
+// the guard N_SetURL and N_SetHeaderByName already had for this same
+// pattern. All tests below now run unconditionally (previously six were
+// @Disabled pending exactly this fix).
 @ExtendWith(TestSetupExtension.class)
 class NullParameterEdgeCaseTest {
     @Test
     void requestSettersAcceptNullStringsWithoutThrowing() {
         CefRequest request = CefRequest.create();
-        // setURL(null) is deliberately NOT exercised here -- see
-        // requestSetURLWithNullDoesNotThrow() below, @Disabled: it hits the
-        // exact same CEF-internal CHECK(!url.empty()) as issue #21, because
-        // native/CefRequest_N.cpp's N_SetURL marshals a null jstring to an
-        // empty CefString() with no guard, same as an explicit "".
-        // setMethod(null) is also deliberately NOT exercised here -- see
-        // requestSetMethodWithNullDoesNotThrow() below, @Disabled: same
-        // unguarded-null-to-empty-CefString() pattern, different CEF-side
-        // CHECK (CHECK(!method.empty()) in request_ctocpp.cc).
-        // setHeaderByName(null, ...) is also deliberately NOT exercised here
-        // -- see requestSetHeaderByNameWithNullNameDoesNotThrow() below,
-        // @Disabled: same pattern as issue #20 (CHECK(!name.empty())),
-        // reached via null instead of "".
         assertDoesNotThrow(() -> request.setHeaderByName("X-Test", null, true));
         assertDoesNotThrow(() -> request.setFirstPartyForCookies(null));
         // Object should remain usable afterward -- not left in a corrupted
@@ -55,13 +55,6 @@ class NullParameterEdgeCaseTest {
         request.dispose();
     }
 
-    // @Disabled -- IMPORTANT: same class of bug as issue #20
-    // (CHECK(!name.empty()) in request_ctocpp.cc via CefRequest::
-    // SetHeaderByName()), reached here via a null |name| instead of "".
-    // Debug/coverage-build-only. Do not remove @Disabled without a fix.
-    @Disabled("Same class of bug as Thrameos/java-cef#20 (CEF's own "
-            + "CHECK(!name.empty())), reached via a null header name -- "
-            + "Debug/coverage-build-only")
     @Test
     void requestSetHeaderByNameWithNullNameDoesNotThrow() {
         CefRequest request = CefRequest.create();
@@ -70,14 +63,6 @@ class NullParameterEdgeCaseTest {
         request.dispose();
     }
 
-    // @Disabled -- IMPORTANT: same class of bug as Thrameos/java-cef#21
-    // (unguarded null-to-empty-CefString() marshaling hitting a CEF-internal
-    // CHECK), this time CHECK(!method.empty()) in request_ctocpp.cc via
-    // CefRequest::SetMethod(). Debug/coverage-build-only. Do not remove
-    // @Disabled without a fix.
-    @Disabled("Same class of bug as Thrameos/java-cef#21 (CEF's own "
-            + "CHECK(!method.empty())), reached via CefRequest.setMethod"
-            + "(null) -- Debug/coverage-build-only")
     @Test
     void requestSetMethodWithNullDoesNotThrow() {
         CefRequest request = CefRequest.create();
@@ -86,15 +71,6 @@ class NullParameterEdgeCaseTest {
         request.dispose();
     }
 
-    // @Disabled -- IMPORTANT: same root cause as Thrameos/java-cef#21
-    // (CEF's own CHECK(!url.empty()) in request_ctocpp.cc), reached here via
-    // a null jstring rather than an explicit empty string -- both marshal to
-    // the same empty CefString() with no guard on the JCEF side. Confirmed
-    // Debug/coverage-build-only, same as #21. Do not remove @Disabled
-    // without a fix; run only under a hard external timeout wrapper.
-    @Disabled("Same root cause as Thrameos/java-cef#21 (CEF's own "
-            + "CHECK(!url.empty())), reached via null instead of \"\" -- "
-            + "Debug/coverage-build-only")
     @Test
     void requestSetURLWithNullDoesNotThrow() {
         CefRequest request = CefRequest.create();
@@ -120,25 +96,11 @@ class NullParameterEdgeCaseTest {
         CefResponse response = CefResponse.create();
         assertDoesNotThrow(() -> response.setMimeType(null));
         assertDoesNotThrow(() -> response.setStatusText(null));
-        // setHeaderByName(null, ...) is deliberately NOT exercised here --
-        // see responseSetHeaderByNameWithNullNameDoesNotThrow() below,
-        // @Disabled: same systemic null-to-empty-CefString() pattern as
-        // issues #19/#20/#21, this time in CefResponse_N.cpp/
-        // response_ctocpp.cc's CHECK(!name.empty()).
         assertDoesNotThrow(() -> response.setHeaderByName("X-Test", null, true));
         assertNotNull(response.toString());
         response.dispose();
     }
 
-    // @Disabled -- IMPORTANT: same systemic class of bug as issues
-    // #19/#20/#21 (see NullParameterEdgeCaseTest's CefRequest-side
-    // reproductions above), this time CHECK(!name.empty()) in
-    // response_ctocpp.cc via CefResponse::SetHeaderByName(). Debug/
-    // coverage-build-only. Do not remove @Disabled without a fix.
-    @Disabled("Same systemic class of bug as Thrameos/java-cef#19/#20/#21 "
-            + "(CEF's own CHECK(!name.empty())), reached via "
-            + "CefResponse.setHeaderByName(null, ...) -- Debug/coverage-"
-            + "build-only")
     @Test
     void responseSetHeaderByNameWithNullNameDoesNotThrow() {
         CefResponse response = CefResponse.create();
@@ -156,14 +118,6 @@ class NullParameterEdgeCaseTest {
         response.dispose();
     }
 
-    // @Disabled -- IMPORTANT: same root cause as Thrameos/java-cef#21 (see
-    // requestSetURLWithNullDoesNotThrow() above): the null |url| argument
-    // marshals to an empty CefString(), hitting CEF's own
-    // CHECK(!url.empty()) inside CefRequest::Set(). Debug/coverage-build-
-    // only. Do not remove @Disabled without a fix.
-    @Disabled("Same root cause as Thrameos/java-cef#21 (CEF's own "
-            + "CHECK(!url.empty())), reached via a null url argument to "
-            + "CefRequest.set() -- Debug/coverage-build-only")
     @Test
     void requestSetAcceptsAllNullArguments() {
         CefRequest request = CefRequest.create();
@@ -172,16 +126,6 @@ class NullParameterEdgeCaseTest {
         request.dispose();
     }
 
-    // @Disabled -- IMPORTANT: same class of bug as issues #20/#21 (see
-    // requestSetURLWithNullDoesNotThrow() above): CHECK(!fileName.empty())
-    // in post_data_element_ctocpp.cc via CefPostDataElement::SetToFile(),
-    // reached because native/CefPostDataElement_N.cpp marshals a null
-    // jstring to an empty CefString() with no guard. Debug/coverage-build-
-    // only. Do not remove @Disabled without a fix.
-    @Disabled("Same class of bug as Thrameos/java-cef#20/#21 (CEF's own "
-            + "CHECK(!fileName.empty())), reached via "
-            + "CefPostDataElement.setToFile(null) -- Debug/coverage-"
-            + "build-only")
     @Test
     void postDataElementSetToFileAcceptsNull() {
         CefPostDataElement element = CefPostDataElement.create();

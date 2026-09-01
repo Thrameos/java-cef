@@ -254,6 +254,13 @@ if(OS_LINUX)
                     ${CMAKE_CURRENT_BINARY_DIR}/leak_probe)
 
   # Same reasoning as leak_probe above -- see
+  # tools_native/null_param_repro/null_param_repro.cc's own comment
+  # (minimum pure-C++ repro for issues #19/#20/#21's systemic
+  # null-to-empty-CefString CHECK() class of bug).
+  add_subdirectory(${CMAKE_SOURCE_DIR}/tools_native/null_param_repro
+                    ${CMAKE_CURRENT_BINARY_DIR}/null_param_repro)
+
+  # Same reasoning as leak_probe above -- see
   # tools_native/jni_noop_probe/JniNoOpProbe.cpp's own comment. Its own
   # separate .so, never linked into libjcef.so.
   add_subdirectory(${CMAKE_SOURCE_DIR}/tools_native/jni_noop_probe
