@@ -22,7 +22,9 @@ else
   "${DIR}"/make_jni_header.sh $1 org.cef.callback.CefDragData_N
   "${DIR}"/make_jni_header.sh $1 org.cef.callback.CefFileDialogCallback_N
   "${DIR}"/make_jni_header.sh $1 org.cef.callback.CefJSDialogCallback_N
+  "${DIR}"/make_jni_header.sh $1 org.cef.callback.CefMediaAccessCallback_N
   "${DIR}"/make_jni_header.sh $1 org.cef.callback.CefMenuModel_N
+  "${DIR}"/make_jni_header.sh $1 org.cef.callback.CefPermissionPromptCallback_N
   "${DIR}"/make_jni_header.sh $1 org.cef.callback.CefPrintDialogCallback_N
   "${DIR}"/make_jni_header.sh $1 org.cef.callback.CefPrintJobCallback_N
   "${DIR}"/make_jni_header.sh $1 org.cef.callback.CefQueryCallback_N

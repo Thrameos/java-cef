@@ -20,11 +20,13 @@
 #include "drag_handler.h"
 #include "find_handler.h"
 #include "focus_handler.h"
+#include "frame_handler.h"
 #include "jsdialog_handler.h"
 #include "keyboard_handler.h"
 #include "life_span_handler.h"
 #include "load_handler.h"
 #include "message_router_handler.h"
+#include "permission_handler.h"
 #include "print_handler.h"
 #include "render_handler.h"
 #include "request_handler.h"
@@ -131,6 +133,11 @@ CefRefPtr<CefFocusHandler> ClientHandler::GetFocusHandler() {
   return GetHandler<FocusHandler>("FocusHandler");
 }
 
+CefRefPtr<CefFrameHandler> ClientHandler::GetFrameHandler() {
+  JCEF_TRACE("ClientHandler::GetFrameHandler() ENTER");
+  return GetHandler<FrameHandler>("FrameHandler");
+}
+
 CefRefPtr<CefJSDialogHandler> ClientHandler::GetJSDialogHandler() {
   JCEF_TRACE("ClientHandler::GetJSDialogHandler() ENTER");
   return GetHandler<JSDialogHandler>("JSDialogHandler");
@@ -149,6 +156,11 @@ CefRefPtr<CefLifeSpanHandler> ClientHandler::GetLifeSpanHandler() {
 CefRefPtr<CefLoadHandler> ClientHandler::GetLoadHandler() {
   JCEF_TRACE("ClientHandler::GetLoadHandler() ENTER");
   return GetHandler<LoadHandler>("LoadHandler");
+}
+
+CefRefPtr<CefPermissionHandler> ClientHandler::GetPermissionHandler() {
+  JCEF_TRACE("ClientHandler::GetPermissionHandler() ENTER");
+  return GetHandler<PermissionHandler>("PermissionHandler");
 }
 
 CefRefPtr<CefPrintHandler> ClientHandler::GetPrintHandler() {

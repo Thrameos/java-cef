@@ -11,12 +11,14 @@
 #include "drag_handler.h"
 #include "find_handler.h"
 #include "focus_handler.h"
+#include "frame_handler.h"
 #include "jni_util.h"
 #include "jsdialog_handler.h"
 #include "keyboard_handler.h"
 #include "life_span_handler.h"
 #include "load_handler.h"
 #include "message_router_handler.h"
+#include "permission_handler.h"
 #include "print_handler.h"
 #include "render_handler.h"
 #include "request_handler.h"
@@ -125,6 +127,15 @@ Java_org_cef_handler_CefClientHandler_N_1removeJSDialogHandler(
 }
 
 JNIEXPORT void JNICALL
+Java_org_cef_handler_CefClientHandler_N_1removeFrameHandler(
+    JNIEnv* env,
+    jobject clientHandler,
+    jobject frameHandler) {
+  SetCefForJNIObject_sync<FrameHandler>(env, frameHandler, nullptr,
+                                      "CefFrameHandler");
+}
+
+JNIEXPORT void JNICALL
 Java_org_cef_handler_CefClientHandler_N_1removeKeyboardHandler(
     JNIEnv* env,
     jobject clientHandler,
@@ -149,6 +160,15 @@ Java_org_cef_handler_CefClientHandler_N_1removeLoadHandler(
     jobject loadHandler) {
   SetCefForJNIObject_sync<LoadHandler>(env, loadHandler, nullptr,
                                      "CefLoadHandler");
+}
+
+JNIEXPORT void JNICALL
+Java_org_cef_handler_CefClientHandler_N_1removePermissionHandler(
+    JNIEnv* env,
+    jobject clientHandler,
+    jobject permissionHandler) {
+  SetCefForJNIObject_sync<PermissionHandler>(env, permissionHandler, nullptr,
+                                           "CefPermissionHandler");
 }
 
 JNIEXPORT void JNICALL

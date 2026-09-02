@@ -145,6 +145,13 @@ public abstract class CefClientHandler implements CefNative {
     abstract protected CefFocusHandler getFocusHandler();
 
     /**
+     * Return the handler for frame life span events.
+     * This method is a callback method and is called by
+     * the native code.
+     */
+    abstract protected CefFrameHandler getFrameHandler();
+
+    /**
      * Return the handler for javascript dialog requests.
      * This method is a callback method and is called by
      * the native code.
@@ -171,6 +178,12 @@ public abstract class CefClientHandler implements CefNative {
      * the native code.
      */
     abstract protected CefLoadHandler getLoadHandler();
+
+    /**
+     * Return the handler for permission requests. If no handler is provided
+     * the default implementation will be used.
+     */
+    abstract protected CefPermissionHandler getPermissionHandler();
 
     /**
      * Return the handler for printing on Linux. If a print handler is not
@@ -266,6 +279,14 @@ public abstract class CefClientHandler implements CefNative {
         }
     }
 
+    protected void removeFrameHandler(CefFrameHandler h) {
+        try {
+            N_removeFrameHandler(h);
+        } catch (UnsatisfiedLinkError err) {
+            err.printStackTrace();
+        }
+    }
+
     protected void removeJSDialogHandler(CefJSDialogHandler h) {
         try {
             N_removeJSDialogHandler(h);
@@ -293,6 +314,14 @@ public abstract class CefClientHandler implements CefNative {
     protected void removeLoadHandler(CefLoadHandler h) {
         try {
             N_removeLoadHandler(h);
+        } catch (UnsatisfiedLinkError err) {
+            err.printStackTrace();
+        }
+    }
+
+    protected void removePermissionHandler(CefPermissionHandler h) {
+        try {
+            N_removePermissionHandler(h);
         } catch (UnsatisfiedLinkError err) {
             err.printStackTrace();
         }
@@ -348,10 +377,12 @@ public abstract class CefClientHandler implements CefNative {
     private final native void N_removeDragHandler(CefDragHandler h);
     private final native void N_removeFindHandler(CefFindHandler h);
     private final native void N_removeFocusHandler(CefFocusHandler h);
+    private final native void N_removeFrameHandler(CefFrameHandler h);
     private final native void N_removeJSDialogHandler(CefJSDialogHandler h);
     private final native void N_removeKeyboardHandler(CefKeyboardHandler h);
     private final native void N_removeLifeSpanHandler(CefLifeSpanHandler h);
     private final native void N_removeLoadHandler(CefLoadHandler h);
+    private final native void N_removePermissionHandler(CefPermissionHandler h);
     private final native void N_removePrintHandler(CefPrintHandler h);
     private final native void N_removeMessageRouter(CefMessageRouter h);
     private final native void N_removeRenderHandler(CefRenderHandler h);

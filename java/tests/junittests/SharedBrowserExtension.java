@@ -690,6 +690,16 @@ public class SharedBrowserExtension implements BeforeAllCallback, BeforeEachCall
         trackCleanup(client_::removeFocusHandler);
     }
 
+    public static void addFrameHandler(org.cef.handler.CefFrameHandler handler) {
+        client_.addFrameHandler(handler);
+        trackCleanup(client_::removeFrameHandler);
+    }
+
+    public static void addPermissionHandler(org.cef.handler.CefPermissionHandler handler) {
+        client_.addPermissionHandler(handler);
+        trackCleanup(client_::removePermissionHandler);
+    }
+
     public static void addJSDialogHandler(CefJSDialogHandler handler) {
         client_.addJSDialogHandler(handler);
         trackCleanup(client_::removeJSDialogHandler);
