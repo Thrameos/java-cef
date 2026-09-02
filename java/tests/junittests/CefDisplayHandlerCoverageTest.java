@@ -14,8 +14,6 @@ import org.junit.jupiter.api.extension.ExtendWith;
 
 import java.awt.Component;
 import java.awt.event.MouseEvent;
-import java.awt.event.MouseListener;
-import java.awt.event.MouseMotionListener;
 
 // native/display_handler.cpp (125 lines, 20% covered per this session's baseline)
 // exercised end to end: onAddressChange fires from ordinary navigation (already
@@ -80,22 +78,15 @@ class CefDisplayHandlerCoverageTest {
                 "console.log('coverage-test-console-message');", browser.getURL(), 1);
 
         Component canvas = browser.getUIComponent();
-        MouseEvent entered = new MouseEvent(
-                canvas, MouseEvent.MOUSE_ENTERED, System.currentTimeMillis(), 0, 0, 0, 0, false);
-        for (MouseListener listener : canvas.getMouseListeners()) {
-            listener.mouseEntered(entered);
-        }
+        canvas.dispatchEvent(new MouseEvent(canvas, MouseEvent.MOUSE_ENTERED,
+                System.currentTimeMillis(), 0, 0, 0, 0, false));
         // A move from outside the styled element to inside it -- some
         // renderers compute hover/cursor state from the transition, not a
         // single absolute position.
-        MouseEvent outside = new MouseEvent(
-                canvas, MouseEvent.MOUSE_MOVED, System.currentTimeMillis(), 0, 0, 0, 0, false);
-        MouseEvent inside = new MouseEvent(
-                canvas, MouseEvent.MOUSE_MOVED, System.currentTimeMillis(), 0, 20, 20, 0, false);
-        for (MouseMotionListener listener : canvas.getMouseMotionListeners()) {
-            listener.mouseMoved(outside);
-            listener.mouseMoved(inside);
-        }
+        canvas.dispatchEvent(new MouseEvent(canvas, MouseEvent.MOUSE_MOVED,
+                System.currentTimeMillis(), 0, 0, 0, 0, false));
+        canvas.dispatchEvent(new MouseEvent(canvas, MouseEvent.MOUSE_MOVED,
+                System.currentTimeMillis() + 1, 0, 20, 20, 0, false));
 
         // These callbacks arrive asynchronously (JS execution, renderer-side
         // hit-testing for the cursor change), so give them time to settle
@@ -106,13 +97,21 @@ class CefDisplayHandlerCoverageTest {
         assertEquals("coverage-test-title", lastTitle[0]);
         assertEquals("coverage-test-console-message", lastConsoleMessage[0]);
 
-        // Not asserted: a synthetic MouseEvent dispatched straight to the
-        // canvas's registered listeners does not reliably reach CEF's
-        // renderer-side hit-testing that drives onCursorChange (confirmed --
-        // tried both a single absolute move and an outside-then-inside
-        // transition pair with a 3s settle, neither triggered it). Left as a
-        // soft, non-fatal signal rather than a flaky assertion; the other
-        // three callbacks above give solid, reliable coverage of this file.
+        // Not asserted: traced the full Java->native path (CefBrowserOsr's
+        // MouseMotionListener -> CefBrowser_N.sendMouseEvent ->
+        // N_SendMouseEvent -> CefBrowserHost::SendMouseMoveEvent, a direct,
+        // unfiltered pass-through with no coordinate/focus gating on the
+        // Java side) -- so this is a real renderer-side hit-testing/hover-
+        // dwell timing issue, not a synthetic-event-delivery bug. Confirmed
+        // directly: `canvas.dispatchEvent()` (matching CefContextMenuTest's
+        // working right-click pattern, tried here too) made no difference in
+        // isolation (5/5 runs still don't fire), but the identical test DID
+        // fire once as part of a long, many-tests-already-run full-suite
+        // pass -- i.e. it depends on the shared browser having already done
+        // enough real paint/compositing work, not on how the event is
+        // delivered. Left as a soft, non-fatal signal rather than a flaky
+        // assertion; the other three callbacks above give solid, reliable
+        // coverage of this file.
         if (lastCursorId[0] == null) {
             System.out.println(
                     "CefDisplayHandlerCoverageTest: onCursorChange did not fire for the "
