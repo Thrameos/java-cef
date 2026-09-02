@@ -78,6 +78,16 @@ Java_org_cef_handler_CefClientHandler_N_1removeDragHandler(JNIEnv*,
 
 /*
  * Class:     org_cef_handler_CefClientHandler
+ * Method:    N_removeFindHandler
+ * Signature: (Lorg/cef/handler/CefFindHandler;)V
+ */
+JNIEXPORT void JNICALL
+Java_org_cef_handler_CefClientHandler_N_1removeFindHandler(JNIEnv*,
+                                                           jobject,
+                                                           jobject);
+
+/*
+ * Class:     org_cef_handler_CefClientHandler
  * Method:    N_removeFocusHandler
  * Signature: (Lorg/cef/handler/CefFocusHandler;)V
  */

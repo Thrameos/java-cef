@@ -29,6 +29,7 @@ class ClientHandler : public CefClient {
   CefRefPtr<CefDisplayHandler> GetDisplayHandler() override;
   CefRefPtr<CefDownloadHandler> GetDownloadHandler() override;
   CefRefPtr<CefDragHandler> GetDragHandler() override;
+  CefRefPtr<CefFindHandler> GetFindHandler() override;
   CefRefPtr<CefFocusHandler> GetFocusHandler() override;
   CefRefPtr<CefJSDialogHandler> GetJSDialogHandler() override;
   CefRefPtr<CefKeyboardHandler> GetKeyboardHandler() override;

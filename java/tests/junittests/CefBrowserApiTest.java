@@ -11,9 +11,11 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.cef.browser.CefBrowser;
 import org.cef.browser.CefFrame;
+import org.cef.handler.CefFindHandlerAdapter;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 
+import java.awt.Rectangle;
 import java.util.Vector;
 
 // Broad, low-risk coverage sweep of CefBrowser_N.cpp (952 lines, only 13%
@@ -31,18 +33,15 @@ import java.util.Vector;
 // RenderProcessHostImpl::FastShutdown() -> ... -> CefFrameHostImpl::
 // DetachRenderFrame() -> mojo::Remote<RenderFrame>::ResetWithReason() ->
 // InterfaceEndpointClient::PassHandle(), which DCHECKs if the endpoint still
-// has a pending responder. find()/viewSource() below are fire-and-forget on
-// the Java side -- JCEF has no CefFindHandler binding at all (no
-// onFindResult), so there is no way to actually wait for find()'s async
-// completion before closing, unlike CEF's own find_handler_unittest.cc
-// (~/devel/cef/tests/ceftests/), which always waits for OnFindResult's
-// finalUpdate before calling StopFinding()+closing. Confirmed by giving the
-// CEF UI thread's message pump a short chance to drain the pending response
-// before closing (below): 5/5 isolated runs and this class's own 6-class
-// batch (with CefBrowserApiDebugSafeTest) both clean under
-// ENABLE_COVERAGE. The real, complete fix is a CefFindHandler Java binding;
-// filed as a follow-up gap, this settle delay is a legitimate mitigation
-// given that gap, not a blind timing hack.
+// has a pending responder. find()/viewSource() below used to be
+// fire-and-forget on the Java side -- JCEF had no CefFindHandler binding at
+// all (no onFindResult), so there was no way to actually wait for find()'s
+// async completion before closing, unlike CEF's own
+// find_handler_unittest.cc (~/devel/cef/tests/ceftests/), which always
+// waits for OnFindResult's finalUpdate before calling StopFinding()+closing.
+// FIXED (GH #32): CefFindHandler is now bound; below waits for the real
+// onFindResult(finalUpdate=true) signal before closing instead of a blind
+// settle delay.
 @ExtendWith(TestSetupExtension.class)
 class CefBrowserApiTest {
     private static final String TEST_URL = "http://test.com/browser_api.html";
@@ -68,6 +67,25 @@ class CefBrowserApiTest {
             protected void setupTest() {
                 addResource(TEST_URL, CONTENT, "text/html");
                 addResource(CHILD_URL, CHILD_CONTENT, "text/html");
+                client_.addFindHandler(new CefFindHandlerAdapter() {
+                    @Override
+                    public void onFindResult(CefBrowser browser, int identifier, int count,
+                            Rectangle selectionRect, int activeMatchOrdinal,
+                            boolean finalUpdate) {
+                        // See the class comment: only call stopFinding()
+                        // once the find has actually settled (finalUpdate),
+                        // matching CEF's own find_handler_unittest.cc --
+                        // calling stopFinding() before that point can
+                        // interrupt the search and suppress the final
+                        // update, per ~/devel/cef/tests/ceftests/
+                        // find_handler_unittest.cc's own comment to that
+                        // effect.
+                        if (finalUpdate) {
+                            browser.stopFinding(true);
+                            terminateTest();
+                        }
+                    }
+                });
                 createBrowser(TEST_URL, true /* useOSR */);
                 super.setupTest();
             }
@@ -104,14 +122,11 @@ class CefBrowserApiTest {
                 browser.viewSource();
                 browser.replaceMisspelling("test");
                 browser.find("body", true, false, false);
-                browser.stopFinding(true);
 
-                // See the class comment: let the pending find()/viewSource()
-                // mojo response settle before closing (JCEF has no
-                // CefFindHandler to wait on directly).
-                new javax.swing.Timer(300, e -> terminateTest()) {
-                    { setRepeats(false); }
-                }.start();
+                // stopFinding()+terminateTest() are called from the
+                // CefFindHandler registered in setupTest() above, once
+                // onFindResult() reports finalUpdate=true. The Watchdog
+                // (see TestFrame) still force-closes if that never arrives.
             }
         };
 
