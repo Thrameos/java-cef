@@ -14,6 +14,10 @@ import org.cef.browser.CefRequestContext;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 
+import java.nio.ByteBuffer;
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 
 // CefRequestContextTest.preferenceAccessorsOffUiThreadDoNotThrow() exercises the
@@ -185,5 +189,88 @@ class CefRequestContextPreferencesTest {
             }
         };
         restoreFrame.awaitCompletion();
+    }
+
+    // Targeted unhappy-path coverage for native/jni_util.cpp's
+    // GetCefValueFromJNI{Integer,Double,Map,List,ByteBuffer} -- none of
+    // this CEF build's currently-settable preferences happen to be of these
+    // types (setPreferenceWithSettablePreferenceRoundTripsNewValue() above
+    // only ever finds Boolean/Integer/Double/String, and per its own
+    // comment deliberately skips Map/List), so the only way to reach these
+    // conversion functions at all is to call setPreference() with a
+    // synthetic value of each type. Uses a name that's guaranteed not to be
+    // a real settable preference (canSetPreference() asserted false first)
+    // so CEF's own SetPreference() call is expected to reject it -- but per
+    // native/CefRequestContext_N.cpp's N_SetPreference, the Java->CefValue
+    // marshaling always runs first, unconditionally, before that rejection,
+    // so this still exercises every conversion function for real.
+    //
+    // Found and fixed a real bug while tracing this path (see
+    // native/jni_util.cpp's GetCefValueFromJNIMap): it built a populated
+    // CefDictionaryValue but returned a brand-new, empty CefValue instead of
+    // attaching the dictionary to it via SetDictionary() (the List sibling
+    // function does this correctly via SetList()) -- every Map ever passed
+    // to setPreference() silently lost all its data. Can't assert on the
+    // fix's effect directly (no settable dict/list preference exists to
+    // round-trip through), but the fixed code is what this test now runs.
+    @Test
+    void setPreferenceWithEachUnmappedJavaTypeDoesNotThrow() {
+        String bogusKey = "this.preference.does.not.exist";
+        String[] intError = {"not run"};
+        String[] doubleError = {"not run"};
+        String[] mapError = {"not run"};
+        String[] listError = {"not run"};
+        String[] byteBufferError = {"not run"};
+        boolean[] settable = {true};
+
+        TestFrame frame = new TestFrame() {
+            @Override
+            protected void setupTest() {
+                addResource(TEST_URL, CONTENT, "text/html");
+                createBrowser(TEST_URL, true /* useOSR */);
+                super.setupTest();
+            }
+
+            @Override
+            public void onAfterCreated(CefBrowser browser) {
+                super.onAfterCreated(browser);
+                CefRequestContext context = CefRequestContext.getGlobalContext();
+                settable[0] = context.canSetPreference(bogusKey);
+
+                intError[0] = context.setPreference(bogusKey, Integer.valueOf(42));
+                doubleError[0] = context.setPreference(bogusKey, Double.valueOf(4.2));
+
+                Map<String, Object> nested = new HashMap<>();
+                nested.put("aString", "value");
+                nested.put("aBool", Boolean.TRUE);
+                Map<String, Object> map = new HashMap<>();
+                map.put("anInt", Integer.valueOf(7));
+                map.put("nested", nested);
+                mapError[0] = context.setPreference(bogusKey, map);
+
+                List<Object> list = new ArrayList<>();
+                list.add("first");
+                list.add(Integer.valueOf(2));
+                list.add(Boolean.FALSE);
+                listError[0] = context.setPreference(bogusKey, list);
+
+                ByteBuffer buf = ByteBuffer.allocateDirect(4);
+                buf.put(new byte[] {1, 2, 3, 4});
+                buf.flip();
+                byteBufferError[0] = context.setPreference(bogusKey, buf);
+
+                terminateTest();
+            }
+        };
+
+        frame.awaitCompletion();
+
+        assertFalse(settable[0]);
+        assertNotNull(intError[0], "Integer setPreference should have reported an error");
+        assertNotNull(doubleError[0], "Double setPreference should have reported an error");
+        assertNotNull(mapError[0], "Map setPreference should have reported an error");
+        assertNotNull(listError[0], "List setPreference should have reported an error");
+        assertNotNull(
+                byteBufferError[0], "ByteBuffer setPreference should have reported an error");
     }
 }

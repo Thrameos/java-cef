@@ -425,6 +425,7 @@ CefRefPtr<CefValue> GetCefValueFromJNIMap(JNIEnv* env, const jobject& obj) {
   }
 
   CefRefPtr<CefValue> value = CefValue::Create();
+  value->SetDictionary(dict);
   return value;
 }
 
