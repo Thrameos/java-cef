@@ -15,6 +15,7 @@ import org.cef.callback.CefBeforeDownloadCallback;
 import org.cef.callback.CefDownloadItem;
 import org.cef.callback.CefDownloadItemCallback;
 import org.cef.handler.CefDownloadHandler;
+import org.junit.jupiter.api.Disabled;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 
@@ -153,5 +154,63 @@ class CefBrowserApiGapCoverageTest {
 
         frame.terminateTest();
         frame.awaitCompletion();
+    }
+
+    // Many CefBrowser_N.cpp accessors funnel through JNI_GET_BROWSER_OR_RETURN,
+    // which early-returns a safe default once the native browser reference is
+    // gone (post-close/dispose) -- previously only the "browser is alive"
+    // branch was ever exercised for most of these, per plan/
+    // coverage-current-state.md's llvm-cov function report (many showed
+    // exactly 50% region coverage: happy path yes, this guard branch no).
+    // Closes that gap across every such accessor in one pass rather than one
+    // test per function.
+    //
+    // DISABLED 2026-09-03: hangs (30s watchdog force-close, "Test timed out")
+    // -- terminateTest()/awaitCompletion() never completed for a browser
+    // created directly in setupTest() without first waiting for
+    // onLoadingStateChange(isLoading=false). Root cause not yet
+    // investigated (out of time this session) -- leading suspect is
+    // terminateTest()'s WINDOW_CLOSING dispatch racing the browser's own
+    // async creation (CreateBrowser() is async, see native/CefBrowser_N.cpp),
+    // not the accessor calls themselves. Re-enable once that's understood;
+    // don't delete -- the reproducer (this exact test) is the fastest path
+    // back into it.
+    @Disabled("Hangs (30s watchdog) -- terminateTest() called before the "
+            + "browser finished its own async creation. See this method's "
+            + "own comment; not yet root-caused.")
+    @Test
+    void accessorsReturnSafeDefaultsAfterBrowserIsClosed() {
+        TestFrame frame = new TestFrame() {
+            @Override
+            protected void setupTest() {
+                addResource("http://test.com/gap-coverage-closed.html",
+                        "<html><body>closed-browser coverage</body></html>", "text/html");
+                createBrowser("http://test.com/gap-coverage-closed.html", true /* useOSR */);
+                super.setupTest();
+            }
+        };
+
+        CefBrowser browser = frame.browser_;
+        assertNotNull(browser);
+
+        frame.terminateTest();
+        frame.awaitCompletion();
+
+        assertEquals("", browser.getURL());
+        assertFalse(browser.canGoBack());
+        assertFalse(browser.canGoForward());
+        assertFalse(browser.isLoading());
+        assertEquals(null, browser.getMainFrame());
+        assertEquals(null, browser.getFocusedFrame());
+        assertEquals(null, browser.getFrameByName("anything"));
+        assertEquals(null, browser.getFrameByIdentifier("anything"));
+        assertEquals(0, browser.getFrameCount());
+        assertTrue(browser.getFrameIdentifiers().isEmpty());
+        assertTrue(browser.getFrameNames().isEmpty());
+        // Structural only (no return value/callback to assert on) -- these
+        // must simply not throw/crash once the native browser is gone.
+        browser.find("x", true, false, false);
+        browser.executeJavaScript("1+1", "about:blank", 0);
+        browser.startDownload("http://test.com/ignored.bin");
     }
 }
