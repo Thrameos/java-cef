@@ -30,9 +30,12 @@
 // doesn't match -- compare against native/context.cpp and
 // native/life_span_handler.cpp's OnBeforeClose handling next.
 
+#include <unistd.h>
+
 #include <atomic>
 #include <chrono>
 #include <cstdlib>
+#include <ctime>
 #include <iostream>
 #include <string>
 #include <thread>
@@ -65,6 +68,24 @@
 //                   the leading untested hypothesis per this session's
 //                   writeup (real JCEF runs inside a JVM process with
 //                   20-30+ other threads; this repro alone never has).
+//
+// ISSUE10_REPRO_RACE_CLOSE=1 -- orthogonal to ISSUE10_REPRO_MODE above.
+// The one "late close" variant not yet tried: instead of calling the late
+// CloseBrowser(true) strictly BEFORE (normal explicit close) or AFTER
+// (ISSUE10_REPRO_LATE_CLOSE) CefShutdown() on the same thread, spawn a
+// genuinely different OS thread that calls it concurrently, timed to land
+// at/around the moment the main thread calls CefShutdown() -- this is the
+// shape of what a real JVM Finalizer thread does (a different thread
+// calling in with zero ordering guarantee relative to CefApp.dispose()),
+// which no prior sequential variant has actually modeled. Leading theory
+// per GH issue #10: CloseBrowser() posts a task to the UI thread's task
+// runner if not already on it (CEF_POST_TASK) -- a task posted at the
+// exact moment CefShutdown() is tearing that runner down is a plausible
+// concrete corruption mechanism a purely sequential test can't reach.
+// ISSUE10_REPRO_RACE_DELAY_US optionally fixes the racer thread's
+// pre-CloseBrowser() sleep (microseconds); default is randomized per run
+// (seeded from time+pid) across [0, 5000) to sweep the timing window
+// across repeated invocations rather than testing one fixed offset.
 
 namespace {
 
@@ -261,9 +282,10 @@ int RunScenario(CefMainArgs& main_args) {
   // torn down CEF's UI-thread/task-runner bookkeeping, this is the call
   // that would touch it.
   bool late_close = getenv("ISSUE10_REPRO_LATE_CLOSE") != nullptr;
-  CefRefPtr<CefBrowser> browser_ref;  // only populated/used in late_close mode
+  bool race_close = getenv("ISSUE10_REPRO_RACE_CLOSE") != nullptr;
+  CefRefPtr<CefBrowser> browser_ref;  // populated in late_close/race_close
 
-  if (!late_close) {
+  if (!late_close && !race_close) {
     client->browser->GetHost()->CloseBrowser(true);
     PumpUntil(client->before_close, 5000);
     if (!client->before_close) {
@@ -276,6 +298,36 @@ int RunScenario(CefMainArgs& main_args) {
   }
   client = nullptr;
 
+  // Racer thread: a genuinely different OS thread than whichever thread is
+  // about to call CefShutdown() below. Started here (before the shutdown
+  // sequence) and released to call CloseBrowser(true) after a short,
+  // randomized (or fixed, via ISSUE10_REPRO_RACE_DELAY_US) sleep -- close
+  // enough to CefShutdown()'s own call below to actually race it, since
+  // both are started with no synchronization between them beyond this.
+  std::thread racer;
+  if (race_close) {
+    int delay_us;
+    if (const char* d = getenv("ISSUE10_REPRO_RACE_DELAY_US")) {
+      delay_us = atoi(d);
+    } else {
+      unsigned seed = static_cast<unsigned>(time(nullptr)) ^
+                      static_cast<unsigned>(getpid());
+      srand(seed);
+      delay_us = rand() % 5000;
+    }
+    std::cout << "race_close: racer thread will sleep " << delay_us
+              << "us then call CloseBrowser(true)\n";
+    racer = std::thread([browser_ref, delay_us] {
+      usleep(delay_us);
+      JCEF_TRACE(
+          "Repro: racer thread calling browser->GetHost()->CloseBrowser(true), "
+          "racing against CefShutdown()");
+      browser_ref->GetHost()->CloseBrowser(true);
+      JCEF_TRACE("Repro: racer thread's CloseBrowser(true) returned");
+      std::cout << "racer thread: CloseBrowser(true) returned\n";
+    });
+  }
+
   // Matches Context::Shutdown() exactly, including its trace points.
   JCEF_TRACE("Shutdown() ENTER");
   for (int i = 0; i < 10; ++i) {
@@ -287,6 +339,12 @@ int RunScenario(CefMainArgs& main_args) {
   CefShutdown();
   JCEF_TRACE("Shutdown() CefShutdown() returned");
   std::cout << "SURVIVED: CefShutdown() returned\n";
+
+  if (racer.joinable()) {
+    racer.join();
+    std::cout << "SURVIVED: racer thread joined\n";
+    browser_ref = nullptr;
+  }
 
   if (late_close) {
     std::cout << "Now calling CloseBrowser(true) AFTER CefShutdown() -- "

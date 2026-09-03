@@ -7,6 +7,7 @@
 
 #include <jni.h>
 
+#include <atomic>
 #include <string>
 #include <type_traits>
 
@@ -417,6 +418,20 @@
 
 // Type specialization helpers for SetCefForJNIObject.
 struct SetCefForJNIObjectHelper {
+  // GH issue #10 derisking probe (2026-09-03): a cheap proxy for "how many
+  // CEF-backed Java wrapper objects does JCEF think are still alive" at any
+  // given moment -- incremented/decremented at this same choke point the
+  // finalizer guard above already uses. This is deliberately NOT a precise
+  // live-object count (see AddRef(CefBaseRefCounted*)/Release(...) below --
+  // both fire on every association change, not just true create/destroy),
+  // but it's a real, cheap signal for whether JCEF-visible async work looks
+  // outstanding at the moment Context::Shutdown() is about to call
+  // CefShutdown(). See the "GH #10: phased/quiescent shutdown" plan.
+  static std::atomic<int> live_object_count;
+  static inline int GetLiveObjectCount() {
+    return live_object_count.load(std::memory_order_relaxed);
+  }
+
   static inline void AddRef(CefBaseScoped* obj) {}
   static inline void Release(CefBaseScoped* obj) {}
 
@@ -435,6 +450,7 @@ struct SetCefForJNIObjectHelper {
   // JCEF_TRACE=1 set.
   static inline void AddRef(CefBaseRefCounted* obj) {
     JCEF_TRACE("REF kind=CEF_ADDREF ptr=%p", (void*)obj);
+    live_object_count.fetch_add(1, std::memory_order_relaxed);
     obj->AddRef();
   }
   static inline void Release(CefBaseRefCounted* obj) {
@@ -461,9 +477,11 @@ struct SetCefForJNIObjectHelper {
       JCEF_TRACE(
           "REF kind=CEF_RELEASE ptr=%p SKIPPED -- CEF already shut down",
           (void*)obj);
+      live_object_count.fetch_sub(1, std::memory_order_relaxed);
       return;
     }
     JCEF_TRACE("REF kind=CEF_RELEASE ptr=%p", (void*)obj);
+    live_object_count.fetch_sub(1, std::memory_order_relaxed);
     obj->Release();
   }
 

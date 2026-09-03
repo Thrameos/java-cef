@@ -8,6 +8,7 @@
 
 #include "client_app.h"
 #include "jcef_trace.h"
+#include "jni_scoped_helpers.h"
 #include "jni_util.h"
 
 #if defined(OS_MACOSX)
@@ -313,6 +314,12 @@ void Context::Shutdown() {
   // base/process/kill_posix.cc immediately precedes this specific DCHECK in
   // every captured repro, but not the other unrelated crash signatures seen
   // this session) -- not yet confirmed. See plan/findings.md.
+  // GH #10 derisking probe (2026-09-03, not yet acted on): log JCEF's own
+  // live-CEF-object count at both ends of this pump -- see the "GH #10:
+  // phased/quiescent shutdown" plan and SetCefForJNIObjectHelper's own
+  // comment. Purely observational; no behavior change here.
+  JCEF_TRACE("Shutdown() live_object_count=%d before pump",
+            SetCefForJNIObjectHelper::GetLiveObjectCount());
   if (external_message_pump_) {
     for (int i = 0; i < 10; ++i)
       CefDoMessageLoopWork();
@@ -320,6 +327,8 @@ void Context::Shutdown() {
 
   temp_window_.reset(nullptr);
 
+  JCEF_TRACE("Shutdown() live_object_count=%d before CefShutdown()",
+            SetCefForJNIObjectHelper::GetLiveObjectCount());
   JCEF_TRACE("Shutdown() calling CefShutdown()...");
   CefShutdown();
   JCEF_TRACE("Shutdown() CefShutdown() returned");

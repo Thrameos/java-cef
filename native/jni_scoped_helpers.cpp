@@ -10,6 +10,9 @@
 #include "client_handler.h"
 #include "jni_util.h"
 
+// static
+std::atomic<int> SetCefForJNIObjectHelper::live_object_count{0};
+
 namespace {
 
 // Retrieves the JNIEnv for the current thread. Attaches the VM to the current
