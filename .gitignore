@@ -1,5 +1,8 @@
 *.gypcmd
 *.mk
+*.log
+*.gcov
+/tools/toolchain/
 *.ncb
 *.opensdf
 *.props

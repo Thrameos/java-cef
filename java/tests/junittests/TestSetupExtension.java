@@ -66,7 +66,16 @@ public class TestSetupExtension
         String[] args = {"--disable-gpu", "--disable-gpu-compositing", "--disable-dev-shm-usage",
                 "--no-sandbox", "--use-gl=disabled", "--disable-software-rasterizer",
                 "--disable-features=OnDeviceModel,OptimizationGuideOnDeviceModel,Vulkan,"
-                        + "VulkanFromANGLE,DefaultANGLEVulkan"};
+                        + "VulkanFromANGLE,DefaultANGLEVulkan",
+                // A synthetic camera/mic device so getUserMedia() can succeed on a
+                // CI agent with no real hardware -- see
+                // CefPermissionHandlerCoverageTest and ~/devel/cef's
+                // media_access_unittest.cc (this project's own reference for the
+                // same flag). Does NOT bypass CefPermissionHandler -- the
+                // permission request still reaches onRequestMediaAccessPermission
+                // and must be explicitly Continue()'d/Cancel()'d, only the
+                // underlying device is fake.
+                "--use-fake-device-for-media-stream"};
 
         // IMPORTANT: pass `args` here, not null. CefApp.getInstance(args, settings)
         // below only forwards `args` onto the command line via the *default*
