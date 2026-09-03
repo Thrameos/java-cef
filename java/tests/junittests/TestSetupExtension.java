@@ -227,10 +227,22 @@ public class TestSetupExtension
 
         CefApp.getInstance().dispose();
 
-        // Wait for CEF shutdown to complete.
+        // Wait for CEF shutdown to complete. Bounded (unlike the old
+        // unbounded countdown_.await()) so a browser whose close never
+        // completes -- confirmed for a browser whose renderer already died
+        // (e.g. CefRequestHandlerCoverageTest's deliberate chrome://crash)
+        // via a real hang caught in a full-suite run 2026-09-03 -- fails
+        // fast instead of blocking CI/the whole test run forever. See
+        // native/util_linux.cpp's OnBeforeClose fallback for the matching
+        // native-side fix to the underlying cause.
         try {
-            countdown_.await();
+            if (!countdown_.await(30, java.util.concurrent.TimeUnit.SECONDS)) {
+                System.out.println(
+                        "TestSetupExtension.close: CefApp shutdown never signaled "
+                        + "TERMINATED within 30s -- proceeding anyway. See GH #10.");
+            }
         } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
         }
     }
 }

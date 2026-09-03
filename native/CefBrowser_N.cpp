@@ -22,6 +22,7 @@
 #include "run_file_dialog_callback.h"
 #include "string_visitor.h"
 #include "temp_window.h"
+#include "util.h"
 #include "window_handler.h"
 
 #if defined(OS_LINUX)
@@ -1498,6 +1499,15 @@ Java_org_cef_browser_CefBrowser_1N_N_1Close(JNIEnv* env,
   if (force != JNI_FALSE) {
     if (browser->GetHost()->IsWindowRenderingDisabled()) {
       browser->GetHost()->CloseBrowser(true);
+#if defined(OS_LINUX)
+      // A browser whose renderer process already died (e.g. via the
+      // chrome://crash debug URL) does not reliably fire a real
+      // OnBeforeClose() when closed afterward -- confirmed 2026-09-03 as a
+      // genuine full-suite hang. See util::ScheduleOnBeforeCloseFallback()'s
+      // own comment (util_linux.cpp) -- safe to call unconditionally, a
+      // no-op if the real OnBeforeClose() already ran.
+      util::ScheduleOnBeforeCloseFallback(browser);
+#endif
     } else {
       // Destroy the native window representation.
       if (CefCurrentlyOn(TID_UI))
