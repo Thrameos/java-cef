@@ -71,20 +71,65 @@ class DragTargetTest {
 
     private static void invokeDragTargetDragEnter(
             CefBrowser browser, CefDragData dragData, int allowedOps) {
+        invoke(browser, "dragTargetDragEnter",
+                new Class<?>[] {CefDragData.class, Point.class, int.class, int.class},
+                dragData, new Point(10, 10), /* modifiers */ 0, allowedOps);
+    }
+
+    // Completes the rest of the drag lifecycle
+    // (dragTargetDragEnter -> dragTargetDragOver -> dragTargetDrop, and
+    // separately dragTargetDragLeave, dragSourceEndedAt,
+    // dragSourceSystemDragEnded) -- all previously 0% covered per
+    // plan/coverage-current-state.md's 2026-09-03 llvm-cov sweep. None of
+    // these fire a CefDragHandler callback of their own (they're one-way
+    // notifications straight through to CefBrowserHost, see
+    // native/CefBrowser_N.cpp) -- this is structural coverage: they must
+    // not throw, matching the same real-drag-can't-be-synthesized rationale
+    // as dragTargetDragEnterInvokesOnDragEnter() above.
+    @Test
+    void restOfDragTargetAndDragSourceLifecycleDoesNotThrow() {
+        SharedBrowserExtension.loadPage("<html><body>drag target 2</body></html>");
+        CefBrowser browser = SharedBrowserExtension.browser();
+
+        try (CefDragData dragData = CefDragData.create()) {
+            dragData.setLinkURL("http://example.com/dragged-link-2");
+            invokeDragTargetDragEnter(browser, dragData, DragOperationMask.DRAG_OPERATION_COPY);
+            invoke(browser, "dragTargetDragOver",
+                    new Class<?>[] {Point.class, int.class, int.class}, new Point(20, 20),
+                    /* modifiers */ 0, DragOperationMask.DRAG_OPERATION_COPY);
+            invoke(browser, "dragTargetDrop", new Class<?>[] {Point.class, int.class},
+                    new Point(20, 20), /* modifiers */ 0);
+        }
+
+        try (CefDragData dragData = CefDragData.create()) {
+            dragData.setLinkURL("http://example.com/dragged-link-3");
+            invokeDragTargetDragEnter(browser, dragData, DragOperationMask.DRAG_OPERATION_COPY);
+            invoke(browser, "dragTargetDragLeave", new Class<?>[0]);
+        }
+
+        invoke(browser, "dragSourceEndedAt", new Class<?>[] {Point.class, int.class},
+                new Point(30, 30), DragOperationMask.DRAG_OPERATION_COPY);
+        invoke(browser, "dragSourceSystemDragEnded", new Class<?>[0]);
+    }
+
+    // Invokes a `protected final` CefBrowser_N drag method via reflection --
+    // same technique/rationale as invokeDragTargetDragEnter() above, just
+    // generalized to any of the DragTarget*/DragSource* methods.
+    private static void invoke(
+            CefBrowser browser, String methodName, Class<?>[] argTypes, Object... args) {
         Class<?> cls = browser.getClass();
         while (cls != null) {
             try {
-                Method m = cls.getDeclaredMethod("dragTargetDragEnter", CefDragData.class,
-                        Point.class, int.class, int.class);
+                Method m = cls.getDeclaredMethod(methodName, argTypes);
                 m.setAccessible(true);
-                m.invoke(browser, dragData, new Point(10, 10), /* modifiers */ 0, allowedOps);
+                m.invoke(browser, args);
                 return;
             } catch (NoSuchMethodException e) {
                 cls = cls.getSuperclass();
             } catch (ReflectiveOperationException e) {
-                fail("Failed to invoke dragTargetDragEnter via reflection: " + e);
+                fail("Failed to invoke " + methodName + " via reflection: " + e);
             }
         }
-        fail("dragTargetDragEnter() not found on " + browser.getClass());
+        fail(methodName + "() not found on " + browser.getClass());
     }
 }
