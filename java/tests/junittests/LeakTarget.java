@@ -95,7 +95,12 @@ class LeakTarget {
     // (DEFAULT_ABORT_RSS_BYTES) is what keeps a large override here safe
     // to actually run.
     static int numBatches() {
+        // See LeakChecker.abortRssBytes()'s comment: system property first,
+        // env var fallback for IsolatedRunner-dispatched child processes.
         String override = System.getProperty("leak.numBatches");
+        if (override == null) {
+            override = System.getenv("leak.numBatches");
+        }
         if (override != null) {
             try {
                 return Integer.parseInt(override);

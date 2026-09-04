@@ -116,6 +116,18 @@ public class TestSetupExtension
                                     command_line.getSwitches(), command_line.hasArguments(),
                                     command_line.getArguments()));
                 }
+
+                // cefcmdline.mutate=true env var: see CefCommandLineMutationTask's
+                // class comment. Off by default -- only IsolatedRunner's dispatch of
+                // CefCommandLineMutationTask (via CefCommandLineMutationTest) sets
+                // this on the child process's environment, never a normal suite run,
+                // so this block never executes against the shared long-lived CefApp
+                // every other test class depends on.
+                if ((process_type == null || process_type.isEmpty())
+                        && "true".equals(System.getenv("cefcmdline.mutate"))) {
+                    TestSetupContext.setCapturedCommandLineMutationProbe(
+                            exerciseAndRestoreCommandLine(command_line));
+                }
             }
 
             @Override
@@ -145,24 +157,29 @@ public class TestSetupExtension
         // Initialize the singleton CefApp instance.
         CefSettings settings = new CefSettings();
 
-        // tools/run_leak_sweep_isolated.sh (see plan/LeakCheckerPort.md's
-        // pooling-design status) launches one fresh JVM+CEF subprocess per
+        // LeakSweepIsolatedTest (via IsolatedRunner/LeakSweepTargetTask, see
+        // those classes' comments) launches one fresh JVM+CEF subprocess per
         // leak-sweep target and hard-exits via Runtime.halt() as soon as
         // that target's result is known, skipping this class's own close()
-        // (CefApp.dispose()) deliberately -- see LeakSweepTest.java's
-        // isolated-mode comment for why. Left at the default (null)
-        // root_cache_path, every subprocess shares the same profile
-        // directory and its SingletonLock; a process that hard-exits
-        // instead of shutting down gracefully doesn't get a chance to
-        // release that lock the normal way, so the *next* subprocess to
-        // start can trip CEF's singleton-collision fatal path (observed
-        // directly: 7 of 8 non-control targets crashed with SIGTRAP on
-        // startup, no output, in the first full isolated-sweep run before
-        // this fix). -Dleak.cachePath=<dir>, set by the driver script to a
-        // fresh per-subprocess directory, routes around the shared profile
-        // entirely rather than trying to make hard-exit-then-immediately-
-        // restart safe against a lock this process never releases.
+        // (CefApp.dispose()) deliberately -- see IsolatedTaskRunnerTest's
+        // halt() comment for why. Left at the default (null) root_cache_path,
+        // every subprocess shares the same profile directory and its
+        // SingletonLock; a process that hard-exits instead of shutting down
+        // gracefully doesn't get a chance to release that lock the normal
+        // way, so the *next* subprocess to start can trip CEF's
+        // singleton-collision fatal path (observed directly: 7 of 8
+        // non-control targets crashed with SIGTRAP on startup, no output, in
+        // the first full isolated-sweep run before this fix).
+        // leak.cachePath, set by LeakSweepIsolatedTest to a fresh
+        // per-subprocess directory (as an env var, not a system property --
+        // see IsolatedRunner's class comment for why only env vars reach
+        // this process), routes around the shared profile entirely rather
+        // than trying to make hard-exit-then-immediately-restart safe
+        // against a lock this process never releases.
         String isolatedCachePath = System.getProperty("leak.cachePath");
+        if (isolatedCachePath == null || isolatedCachePath.isEmpty()) {
+            isolatedCachePath = System.getenv("leak.cachePath");
+        }
         if (isolatedCachePath != null && !isolatedCachePath.isEmpty()) {
             settings.root_cache_path = isolatedCachePath;
             settings.cache_path = isolatedCachePath;
@@ -199,6 +216,70 @@ public class TestSetupExtension
         // via --select-class -- start from that same precondition, not just
         // the isolated leak-sweep case that happened to need it first.
         warmUpBrowserProcess();
+    }
+
+    // Exercises CefCommandLine_N.cpp's N_Reset/N_GetProgram/N_SetProgram/
+    // N_HasSwitch/N_GetSwitchValue/N_AppendArgument directly on the real,
+    // live browser-process CefCommandLine -- the only instance reachable
+    // from Java, with no public factory -- then restores it to an
+    // equivalent state (same program, same switches, same arguments)
+    // before returning, so whatever CEF does with this object for the
+    // rest of browser-process startup is unaffected. Only called when the
+    // cefcmdline.mutate env var is "true" (see the call site above); that's
+    // only ever set by IsolatedRunner's dispatch of
+    // CefCommandLineMutationTask (via CefCommandLineMutationTest), never a
+    // normal suite run, so a real app/test never observes this.
+    private static TestSetupContext.CommandLineMutationProbe exerciseAndRestoreCommandLine(
+            org.cef.callback.CefCommandLine commandLine) {
+        String originalProgram = commandLine.getProgram(); // N_GetProgram
+        java.util.Map<String, String> originalSwitches = commandLine.getSwitches();
+        java.util.Vector<String> originalArguments = commandLine.getArguments();
+
+        boolean hadNoSandboxSwitch = commandLine.hasSwitch("no-sandbox"); // N_HasSwitch
+        String useGlSwitchValue = commandLine.getSwitchValue("use-gl"); // N_GetSwitchValue
+
+        commandLine.reset(); // N_Reset
+        // CEF's CefCommandLineImpl::SetProgram() CHECK-fails
+        // ("!program.empty()", command_line_ctocpp.cc:222) on an empty
+        // string -- confirmed the hard way (a Debug/coverage-build crash)
+        // when originalProgram came back "" for the real browser-process
+        // command line, which it legitimately does under JCEF (no argv[0]
+        // equivalent set this early for an embedded framework). reset()
+        // itself never touches the program component (see its own
+        // Javadoc), so there is no way to set the program back to "" via
+        // this API either way -- exercise N_SetProgram with a harmless
+        // placeholder instead when the original was empty; leaving that
+        // placeholder in place for the rest of this disposable subprocess
+        // is harmless (Chromium only uses it for cosmetic process-title
+        // reporting).
+        commandLine.setProgram(originalProgram.isEmpty() ? "jcef-coverage-probe" : originalProgram);
+        // A throwaway argument, immediately discarded by the second reset()
+        // below -- exists purely to exercise N_AppendArgument, since
+        // originalArguments is expected to be empty for the browser process
+        // (TestSetupExtension only ever passes switches, never bare
+        // arguments) and appending nothing would leave that downcall
+        // uncovered.
+        commandLine.appendArgument("jcef-coverage-probe-arg"); // N_AppendArgument
+        commandLine.reset();
+        if (!originalProgram.isEmpty()) {
+            commandLine.setProgram(originalProgram);
+        }
+        for (java.util.Map.Entry<String, String> entry : originalSwitches.entrySet()) {
+            if (entry.getValue() == null || entry.getValue().isEmpty()) {
+                commandLine.appendSwitch(entry.getKey());
+            } else {
+                commandLine.appendSwitchWithValue(entry.getKey(), entry.getValue());
+            }
+        }
+        for (String argument : originalArguments) {
+            commandLine.appendArgument(argument);
+        }
+
+        boolean restoredSwitchesMatch = commandLine.getSwitches().equals(originalSwitches);
+        boolean restoredArgumentsMatch = commandLine.getArguments().equals(originalArguments);
+
+        return new TestSetupContext.CommandLineMutationProbe(originalProgram, hadNoSandboxSwitch,
+                useGlSwitchValue, restoredSwitchesMatch, restoredArgumentsMatch);
     }
 
     private static void warmUpBrowserProcess() {

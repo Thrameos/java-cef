@@ -79,6 +79,43 @@ class TestSetupContext {
                 new SchemeRegistrationResults(firstResult, secondResult);
     }
 
+    // Results of TestSetupExtension's -Dcefcmdline.mutate=true probe, which
+    // exercises CefCommandLine_N.cpp's N_Reset/N_GetProgram/N_SetProgram/
+    // N_HasSwitch/N_GetSwitchValue/N_AppendArgument directly on the real
+    // browser-process CefCommandLine, then restores it to its original
+    // switches/arguments before the callback returns. See
+    // CefCommandLineMutationCoverageTest's class comment for why this is
+    // gated behind that system property (only ever run in a disposable
+    // isolated subprocess) and plan/tasks/20260903-02-coverage-gaps-table.md
+    // for which rows this closes.
+    static final class CommandLineMutationProbe {
+        final String originalProgram;
+        final boolean hadNoSandboxSwitch;
+        final String useGlSwitchValue;
+        final boolean restoredSwitchesMatch;
+        final boolean restoredArgumentsMatch;
+
+        CommandLineMutationProbe(String originalProgram, boolean hadNoSandboxSwitch,
+                String useGlSwitchValue, boolean restoredSwitchesMatch,
+                boolean restoredArgumentsMatch) {
+            this.originalProgram = originalProgram;
+            this.hadNoSandboxSwitch = hadNoSandboxSwitch;
+            this.useGlSwitchValue = useGlSwitchValue;
+            this.restoredSwitchesMatch = restoredSwitchesMatch;
+            this.restoredArgumentsMatch = restoredArgumentsMatch;
+        }
+    }
+
+    private static CommandLineMutationProbe capturedCommandLineMutationProbe_ = null;
+
+    static CommandLineMutationProbe getCapturedCommandLineMutationProbe() {
+        return capturedCommandLineMutationProbe_;
+    }
+
+    static void setCapturedCommandLineMutationProbe(CommandLineMutationProbe probe) {
+        capturedCommandLineMutationProbe_ = probe;
+    }
+
     // Initialize from global configuration parameters.
     static void initialize(ExtensionContext context) {
         Optional<String> debugPrint = context.getConfigurationParameter("debugPrint");
