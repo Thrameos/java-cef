@@ -1,0 +1,372 @@
+# JCEF CI (Thrameos/java-cef fork).
+#
+# Ported from the .azure/ Azure Pipelines definition (see git history for that
+# version) after discovering Azure DevOps public projects are retired as of
+# April 2026 (no new public projects can be created, and even an org that
+# already has one grandfathered public project caps at that single slot) --
+# a private-project pipeline there is stuck at 0 free Microsoft-hosted
+# parallel jobs until Microsoft manually grants more, which can take days and
+# isn't something a future contributor/upstream maintainer could reliably
+# reproduce. GitHub Actions has none of that: public repos get unlimited free
+# minutes on GitHub-hosted runners with zero extra account/billing setup, and
+# the workflow lives in-repo so any fork just gets working CI for free. All
+# the actual test/build logic below (Xvfb+icewm+dbus headless recipe, tag
+# exclusions, LLVM coverage) is unchanged from what was verified working
+# under Azure Pipelines' real headless environment.
+#
+# Test/Coverage (full build + headless JUnit run) are Linux-only -- see
+# plan/findings.md for the staging rationale (zero verified-working recipe for
+# headless Windows/macOS CEF test execution yet; proving the pattern on one
+# platform first beats a slow first push).
+#
+# build-windows/build-macos below are a lower-risk fast-follow: build-only
+# (native compile + Java compile, no test execution), since none of the
+# hangs/crashes found on Linux this session (java-cef#3, #4) are build-time
+# issues -- they're all in test-time browser lifecycle/shutdown.
+
+name: CI
+
+on:
+  push:
+    branches:
+      - master
+      - 'fix/**'
+      - 'ci/**'
+    paths:
+      - '.github/workflows/**'
+      - 'CMakeLists.txt'
+      - 'cmake/**'
+      - 'native/**'
+      - 'java/**'
+      - 'tools/**'
+  pull_request:
+    branches:
+      - master
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '21'
+
+      # Cache the downloaded CEF binary distribution (~615MB compressed for linux64) so
+      # CI doesn't re-download it from cef-builds.spotifycdn.com on every run. Caches the
+      # compressed .tar.bz2 (not the ~3GB extracted tree) -- DownloadCEF.cmake (see
+      # cmake/DownloadCEF.cmake) already skips the network download if the tarball is
+      # present at the expected path, and re-extracting a cached tarball is fast.
+      # Cache key includes CEF_VERSION (parsed out of CMakeLists.txt) so a version bump
+      # naturally invalidates the cache instead of silently reusing a stale binary.
+      - name: Parse CEF_VERSION from CMakeLists.txt
+        id: cef-version
+        run: |
+          CEF_VERSION=$(sed -n 's/.*set(CEF_VERSION "\([^"]*\)").*/\1/p' CMakeLists.txt)
+          if [ -z "$CEF_VERSION" ]; then
+            echo "ERROR: could not parse CEF_VERSION from CMakeLists.txt"
+            exit 1
+          fi
+          echo "CEF_VERSION=$CEF_VERSION"
+          echo "version=$CEF_VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Cache CEF binary distribution
+        uses: actions/cache@v4
+        with:
+          path: third_party/cef
+          key: cef-${{ steps.cef-version.outputs.version }}-${{ runner.os }}
+
+      - name: Install native build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ninja-build libx11-dev libgtk-3-dev libnss3 libasound2t64
+
+      - name: Configure and build native (jcef)
+        run: |
+          mkdir -p jcef_build
+          cd jcef_build
+          cmake -G "Ninja" -DCMAKE_BUILD_TYPE=Release -DENABLE_COVERAGE=false ..
+          ninja jcef
+
+      - name: Compile Java
+        run: tools/compile.sh linux64
+
+      # Requires its own X server, window manager, and D-Bus session -- a bare
+      # Xvfb has neither a WM nor a real dbus session, and CEF's windowed-mode
+      # X11 path (even for the OSR tests, which still open an AWT window to
+      # host the off-screen buffer) needs both; without a WM, CEF stalls
+      # before even creating a browser (see plan/findings.md for the full
+      # investigation).
+      - name: Install headless test dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y xvfb icewm dbus-x11
+
+      - name: Start Xvfb + window manager
+        run: |
+          Xvfb :99 -screen 0 1280x1024x24 -nolisten tcp -nolisten unix &
+          sleep 2
+          DISPLAY=:99 icewm &
+          sleep 2
+
+      # --exclude-tag leak-sweep/process-isolated: both are mechanism tags, not bug
+      # exclusions (see plan/state.md's "Not in this table" note) -- leak-sweep spawns
+      # 11 isolated-subprocess targets on its own multi-minute budget, and
+      # process-isolated (IsolatedTaskRunnerTest) is a shared subprocess entry point
+      # that must only ever be launched by IsolatedRunner, never directly; picked up
+      # by a bare --select-package run it calls Runtime.halt() as designed, killing
+      # the whole suite one test in.
+      #
+      # run_tests_ci.sh (not run_tests.sh directly): distinguishes a real test
+      # failure from the known, separately-tracked native shutdown-race crash (see
+      # plan/state.md's "Open, live bugs") that aborts the whole process in
+      # CefApp.dispose() teardown strictly after every real test has already passed
+      # -- reports both as failing CI (honest red, no swallowed exit code) but with
+      # a clear, distinct message for which one actually happened.
+      #
+      # The `timeout` wrapper is still deliberate: a future regression in the
+      # windowed-close handshake area (or a new test that accidentally uses
+      # TestFrame's default windowed mode -- see java-cef#364) should fail the build
+      # loudly and fast, not hang the whole job for its full time budget.
+      - name: Run JUnit test bench
+        run: |
+          export DISPLAY=:99
+          eval $(dbus-launch --sh-syntax)
+          timeout 120 tools/run_tests_ci.sh linux64 Release --config debugPrint=true \
+              --exclude-tag leak-sweep --exclude-tag process-isolated
+
+  coverage:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '21'
+
+      - name: Parse CEF_VERSION from CMakeLists.txt
+        id: cef-version
+        run: |
+          CEF_VERSION=$(sed -n 's/.*set(CEF_VERSION "\([^"]*\)").*/\1/p' CMakeLists.txt)
+          if [ -z "$CEF_VERSION" ]; then
+            echo "ERROR: could not parse CEF_VERSION from CMakeLists.txt"
+            exit 1
+          fi
+          echo "CEF_VERSION=$CEF_VERSION"
+          echo "version=$CEF_VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Cache CEF binary distribution
+        uses: actions/cache@v4
+        with:
+          path: third_party/cef
+          key: cef-${{ steps.cef-version.outputs.version }}-${{ runner.os }}
+
+      # Native coverage via ENABLE_LLVM_COVERAGE (Clang source-based coverage, see
+      # CMakeLists.txt) and Java coverage via a JaCoCo agent around the same JUnit
+      # run used by the test job. Both reports uploaded to Codecov in one step.
+      #
+      # NOT gcov/gcovr/ENABLE_COVERAGE: gcov's .gcda writer is not fork-safe against
+      # CEF's zygote-style process model (a forked child that exits via atexit
+      # instead of _exit() clobbers the parent's real counters with a near-empty
+      # snapshot) -- confirmed directly on this project (see
+      # plan/workflows/coverage.md and the coverage_zygote_fork_gcov_bug memory):
+      # CefMenuModel_N.cpp showed 0% under gcov despite its test genuinely passing
+      # and exercising every line, 83.81% under this fix. Any gcov-based percentage
+      # for this project is untrustworthy. ENABLE_LLVM_COVERAGE sidesteps this
+      # entirely -- each process gets its own raw profile file
+      # (LLVM_PROFILE_FILE's %p PID pattern), so CEF's forking is a non-issue.
+      #
+      # Requires clang-18+ (see CMakeLists.txt's ENABLE_LLVM_COVERAGE comment --
+      # clang-14/15 can't parse CEF's own base/internal/cef_bind_internal.h, a real
+      # parser limitation fixed in clang-18). Fetched fresh each run rather than
+      # relying on any persisted toolchain -- this is a clean runner image, not a
+      # dev box with tools/toolchain/ already populated (that path is .gitignored,
+      # a local dev convenience only).
+      - name: Install build + headless test dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ninja-build libx11-dev libgtk-3-dev libnss3 libasound2t64 \
+            xvfb icewm dbus-x11 libtinfo5
+
+      - name: Fetch clang-18 (required by ENABLE_LLVM_COVERAGE)
+        run: |
+          curl -sL -o clang18.tar.xz \
+            https://github.com/llvm/llvm-project/releases/download/llvmorg-18.1.8/clang+llvm-18.1.8-x86_64-linux-gnu-ubuntu-18.04.tar.xz
+          mkdir -p tools/toolchain
+          tar xf clang18.tar.xz -C tools/toolchain/
+
+      - name: Configure and build native (LLVM coverage-instrumented)
+        run: |
+          CLANG_DIR="$(pwd)/tools/toolchain/clang+llvm-18.1.8-x86_64-linux-gnu-ubuntu-18.04"
+          mkdir -p jcef_build
+          cd jcef_build
+          cmake -G "Ninja" -DENABLE_LLVM_COVERAGE=ON \
+            -DCMAKE_C_COMPILER="${CLANG_DIR}/bin/clang" \
+            -DCMAKE_CXX_COMPILER="${CLANG_DIR}/bin/clang++" ..
+          ninja jcef
+
+      - name: Compile Java
+        run: tools/compile.sh linux64
+
+      - name: Fetch JaCoCo
+        run: |
+          curl -sSL -o jacocoagent.jar \
+            https://repo1.maven.org/maven2/org/jacoco/org.jacoco.agent/0.8.12/org.jacoco.agent-0.8.12-runtime.jar
+          curl -sSL -o jacococli.jar \
+            https://repo1.maven.org/maven2/org/jacoco/org.jacoco.cli/0.8.12/org.jacoco.cli-0.8.12-nodeps.jar
+
+      - name: Start Xvfb + window manager
+        run: |
+          Xvfb :99 -screen 0 1280x1024x24 -nolisten tcp -nolisten unix &
+          sleep 2
+          DISPLAY=:99 icewm &
+          sleep 2
+
+      # KNOWN ISSUE (see plan/state.md's "Open, live bugs"): a pre-existing native
+      # shutdown-race crash aborts the whole process in CefApp.dispose() teardown,
+      # strictly after every real test has already run. Individual test results
+      # and their coverage data are unaffected -- each process's own .profraw file
+      # (LLVM_PROFILE_FILE) is written incrementally, not just at a final atexit
+      # flush like gcov, so this doesn't lose data the way the old gcov setup did
+      # -- but this step's own exit code is still non-zero, so continue-on-error
+      # keeps this from hard-blocking the job while that separately-tracked issue
+      # is unresolved.
+      - name: Run JUnit test bench under JaCoCo agent
+        continue-on-error: true
+        run: |
+          export DISPLAY=:99
+          eval $(dbus-launch --sh-syntax)
+
+          # ENABLE_LLVM_COVERAGE forces a Debug build (see CMakeLists.txt), not Release.
+          LIB_PATH="$(pwd)/jcef_build/native/Debug"
+          OUT_PATH="$(pwd)/out/linux64"
+          export LD_LIBRARY_PATH="$LIB_PATH"
+
+          CLS_PATH="$OUT_PATH"
+          for jar in third_party/jogamp/jar/*.jar; do
+            CLS_PATH="$(pwd)/${jar}:${CLS_PATH}"
+          done
+
+          mkdir -p profraw
+          export LLVM_PROFILE_FILE="$(pwd)/profraw/jcef-%p.profraw"
+
+          # --exclude-tag leak-sweep/process-isolated: see the test job's comment --
+          # without these, IsolatedTaskRunnerTest (picked up by a bare
+          # --select-package run) calls Runtime.halt() as designed, killing the
+          # whole JVM and zeroing out coverage for every test that would have run
+          # after it.
+          LD_PRELOAD=libcef.so timeout 120 java \
+            -Djava.library.path="$LIB_PATH" \
+            -javaagent:jacocoagent.jar=destfile=jacoco.exec \
+            -jar third_party/junit/junit-platform-console-standalone-*.jar \
+            -cp "$CLS_PATH" --select-package tests.junittests --config debugPrint=true \
+            --exclude-tag leak-sweep --exclude-tag process-isolated
+
+      - name: Generate and upload coverage reports
+        run: |
+          CLANG_DIR="$(pwd)/tools/toolchain/clang+llvm-18.1.8-x86_64-linux-gnu-ubuntu-18.04"
+          "${CLANG_DIR}/bin/llvm-profdata" merge -sparse profraw/*.profraw -o merged.profdata
+          "${CLANG_DIR}/bin/llvm-cov" export jcef_build/native/Debug/libjcef.so \
+            -instr-profile=merged.profdata \
+            -ignore-filename-regex='third_party/cef|/usr/|libc\+\+' \
+            -format=lcov > coverage_native.info
+
+          java -jar jacococli.jar report jacoco.exec \
+            --classfiles out/linux64 --sourcefiles java \
+            --xml coverage_java.xml
+
+      - uses: codecov/codecov-action@v4
+        with:
+          files: coverage_native.info,coverage_java.xml
+          fail_ci_if_error: false
+
+  build-windows:
+    runs-on: windows-2022
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '21'
+
+      - name: Parse CEF_VERSION from CMakeLists.txt
+        id: cef-version
+        shell: bash
+        run: |
+          CEF_VERSION=$(sed -n 's/.*set(CEF_VERSION "\([^"]*\)").*/\1/p' CMakeLists.txt)
+          if [ -z "$CEF_VERSION" ]; then
+            echo "ERROR: could not parse CEF_VERSION from CMakeLists.txt"
+            exit 1
+          fi
+          echo "CEF_VERSION=$CEF_VERSION"
+          echo "version=$CEF_VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Cache CEF binary distribution
+        uses: actions/cache@v4
+        with:
+          path: third_party/cef
+          key: cef-${{ steps.cef-version.outputs.version }}-${{ runner.os }}
+
+      # Vendored gsutil under tools/buildtools needs six.moves; not preinstalled
+      # on this image.
+      - name: Install six
+        run: python -m pip install six
+
+      - name: Configure and build native (jcef)
+        run: |
+          mkdir jcef_build
+          cd jcef_build
+          cmake -G "Visual Studio 17 2022" -A x64 -DCMAKE_BUILD_TYPE=Release ..
+          cmake --build . --config Release --target jcef
+
+      - name: Compile Java
+        run: tools\compile.bat win64
+
+  build-macos:
+    runs-on: macos-14
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '21'
+
+      - name: Parse CEF_VERSION from CMakeLists.txt
+        id: cef-version
+        run: |
+          CEF_VERSION=$(sed -n 's/.*set(CEF_VERSION "\([^"]*\)").*/\1/p' CMakeLists.txt)
+          if [ -z "$CEF_VERSION" ]; then
+            echo "ERROR: could not parse CEF_VERSION from CMakeLists.txt"
+            exit 1
+          fi
+          echo "CEF_VERSION=$CEF_VERSION"
+          echo "version=$CEF_VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Cache CEF binary distribution
+        uses: actions/cache@v4
+        with:
+          path: third_party/cef
+          key: cef-${{ steps.cef-version.outputs.version }}-${{ runner.os }}
+
+      # Vendored gsutil under tools/buildtools needs six.moves; not preinstalled
+      # on this image. macOS's system Python 3.12+ is externally-managed (PEP
+      # 668), so --break-system-packages is required for a bare pip install to
+      # succeed in this throwaway CI VM.
+      - name: Install six
+        run: python3 -m pip install --break-system-packages six
+
+      - name: Configure and build native (jcef, invokes Ant for Java per CLAUDE.md)
+        run: |
+          mkdir jcef_build
+          cd jcef_build
+          cmake -G "Ninja" -DCMAKE_BUILD_TYPE=Release ..
+          ninja jcef
