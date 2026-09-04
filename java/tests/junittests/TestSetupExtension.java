@@ -58,7 +58,27 @@ public class TestSetupExtension
             return;
         }
 
-        CefApp.addAppHandler(new CefAppHandlerAdapter(null) {
+        // These CI/headless-environment flags are required for the test bench to
+        // run on a display-less CI agent (no real GPU, no Vulkan driver): without
+        // them a GPU-process crash during browser teardown triggers a slow (multi-
+        // minute) Vulkan/on-device-model probing fallback that blows past any
+        // reasonable test timeout, rather than a fast, clean failure.
+        String[] args = {"--disable-gpu", "--disable-gpu-compositing", "--disable-dev-shm-usage",
+                "--no-sandbox", "--use-gl=disabled", "--disable-software-rasterizer",
+                "--disable-features=OnDeviceModel,OptimizationGuideOnDeviceModel,Vulkan,"
+                        + "VulkanFromANGLE,DefaultANGLEVulkan"};
+
+        // IMPORTANT: pass `args` here, not null. CefApp.getInstance(args, settings)
+        // below only forwards `args` onto the command line via the *default*
+        // CefAppHandlerAdapter.onBeforeCommandLineProcessing() that CefApp installs
+        // on itself as appHandler_ -- but only if appHandler_ is still unset at
+        // that point. addAppHandler() here runs first and permanently replaces
+        // appHandler_, so if this adapter were constructed with `null` (as it
+        // originally was), the args above would be silently discarded and never
+        // reach the real Chromium command line. Base-class CefAppHandlerAdapter's
+        // own onBeforeCommandLineProcessing(), inherited unmodified here, does the
+        // forwarding as long as args_ is non-null.
+        CefApp.addAppHandler(new CefAppHandlerAdapter(args) {
             @Override
             public void stateHasChanged(org.cef.CefApp.CefAppState state) {
                 if (state == CefAppState.TERMINATED) {
@@ -70,15 +90,6 @@ public class TestSetupExtension
 
         // Initialize the singleton CefApp instance.
         CefSettings settings = new CefSettings();
-        // These CI/headless-environment flags are required for the test bench to
-        // run on a display-less CI agent (no real GPU, no Vulkan driver): without
-        // them a GPU-process crash during browser teardown triggers a slow (multi-
-        // minute) Vulkan/on-device-model probing fallback that blows past any
-        // reasonable test timeout, rather than a fast, clean failure.
-        String[] args = {"--disable-gpu", "--disable-gpu-compositing", "--disable-dev-shm-usage",
-                "--no-sandbox", "--use-gl=disabled", "--disable-software-rasterizer",
-                "--disable-features=OnDeviceModel,OptimizationGuideOnDeviceModel,Vulkan,"
-                        + "VulkanFromANGLE,DefaultANGLEVulkan"};
 
         // tools/run_leak_sweep_isolated.sh (see plan/LeakCheckerPort.md's
         // pooling-design status) launches one fresh JVM+CEF subprocess per
