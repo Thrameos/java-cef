@@ -17,7 +17,7 @@ import java.util.Vector;
 
 // Test the TestFrame implementation.
 @ExtendWith(TestSetupExtension.class)
-class DragDataTest {
+class CefDragDataTest {
     @Test
     void createEmpty() {
         CefDragData dragData = CefDragData.create();

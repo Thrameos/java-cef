@@ -26,7 +26,7 @@ import java.util.concurrent.CountDownLatch;
 // as regression coverage that the shared-browser harness actually avoids
 // that exposure.
 @ExtendWith({TestSetupExtension.class, SharedBrowserExtension.class})
-class DisplayHandlerTest {
+class CefDisplayHandlerTest {
     private final String testContent_ =
             "<html><head><title>Test Title</title></head><body>Test!</body></html>";
 

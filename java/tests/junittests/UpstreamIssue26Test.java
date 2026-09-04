@@ -46,7 +46,7 @@ class UpstreamIssue26Test {
     // earlier version of this test used Integer.parseInt() here and threw an
     // uncaught NumberFormatException from inside the onTitleChange() native
     // callback thread, which (matching the caution already documented in
-    // UpstreamIssue398Test/DisplayHandlerTest) caused a genuine unrecoverable
+    // UpstreamIssue398Test/CefDisplayHandlerTest) caused a genuine unrecoverable
     // hang rather than a clean test failure.
     private static final String CONTENT = "<html><body style='margin:0'>"
             + "<div style='height:5000px'>tall content</div>"

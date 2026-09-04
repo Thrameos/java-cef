@@ -30,10 +30,10 @@ import java.io.ByteArrayOutputStream;
 // What IS still real, testable coverage: passing a real (non-null) OutputStream
 // causes native/CefDragData_N.cpp to construct a WriteHandler unconditionally
 // before checking whether there's any content -- unlike a null stream, which
-// short-circuits before WriteHandler is ever touched (see DragDataTest.
+// short-circuits before WriteHandler is ever touched (see CefDragDataTest.
 // createEmpty(), which only exercises the null case).
 @ExtendWith(TestSetupExtension.class)
-class DragDataFileContentsTest {
+class CefDragDataFileContentsTest {
     @Test
     void getFileContentsWithRealStreamConstructsWriteHandlerButWritesNothing() {
         CefDragData dragData = CefDragData.create();

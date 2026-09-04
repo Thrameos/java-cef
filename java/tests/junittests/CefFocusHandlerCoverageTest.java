@@ -28,7 +28,7 @@ import java.util.concurrent.CountDownLatch;
 //
 // Migrated to the shared-browser (Tier 1) harness -- see plan/roadmap.md's
 // "two-tier test harness" entry -- as one of the two proof-of-concept
-// classes: this test (with DisplayHandlerTest) is what originally reproduced
+// classes: this test (with CefDisplayHandlerTest) is what originally reproduced
 // issue #4/#23's second, still-unfixed all_.empty() mechanism when both ran
 // under TestFrame's one-browser-per-test model, so it doubles as regression
 // coverage that the shared-browser harness actually avoids that exposure.

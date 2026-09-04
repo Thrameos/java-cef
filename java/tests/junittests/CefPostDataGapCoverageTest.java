@@ -68,7 +68,7 @@ class CefPostDataGapCoverageTest {
             // element1 was removed from postData above and never re-added;
             // element2 was removed from postData via removeElements(). Both
             // remain independently owned Java-side objects that still need
-            // disposing (same convention as DragDataTest's "explicit cleanup
+            // disposing (same convention as CefDragDataTest's "explicit cleanup
             // to avoid memory leaks" comments elsewhere in this suite).
             element1.dispose();
             element2.dispose();
