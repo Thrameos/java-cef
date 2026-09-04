@@ -299,12 +299,28 @@ jobs:
           # --select-package run) calls Runtime.halt() as designed, killing the
           # whole JVM and zeroing out coverage for every test that would have run
           # after it.
+          #
+          # --exclude-classname CefPostDataTest/CefPrintSettingsTest/
+          # CefRequestContextTest: known, previously-diagnosed (2026-08-29, see
+          # plan/archive/20260829-roadmap-session-log.md) Debug-build-only
+          # CHECK/DCHECK failures in CEF's native layer (e.g.
+          # post_data_element_ctocpp.cc:69's "!fileName.empty()" CHECK) --
+          # ENABLE_LLVM_COVERAGE forces a Debug build, and these three classes
+          # pass cleanly under the test job's Release build but abort the JVM
+          # (SIGTRAP) under Debug, zeroing out coverage for everything that
+          # would have run after them in the same process. Confirmed live: this
+          # crash is what caused the first real run of this job to report a
+          # bogus 0% Java coverage number. Not a fix, matches the workaround
+          # already established and documented for this exact issue.
           LD_PRELOAD=libcef.so timeout 120 java \
             -Djava.library.path="$LIB_PATH" \
             -javaagent:jacocoagent.jar=destfile=jacoco.exec \
             -jar third_party/junit/junit-platform-console-standalone-*.jar \
             -cp "$CLS_PATH" --select-package tests.junittests --config debugPrint=true \
-            --exclude-tag leak-sweep --exclude-tag process-isolated
+            --exclude-tag leak-sweep --exclude-tag process-isolated \
+            --exclude-classname '.*\.CefPostDataTest' \
+            --exclude-classname '.*\.CefPrintSettingsTest' \
+            --exclude-classname '.*\.CefRequestContextTest'
 
       - name: Generate and upload coverage reports
         run: |
