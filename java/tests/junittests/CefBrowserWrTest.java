@@ -8,7 +8,6 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.cef.browser.CefBrowser;
-import org.junit.jupiter.api.Disabled;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 
@@ -129,13 +128,9 @@ class CefBrowserWrTest {
     private static final String TEST_URL = "http://test.com/windowed.html";
 
     @Test
-    @Disabled("Windowed close itself is now fixed (see class comment) -- this test still can't "
-            + "run because the suite-global teardown that follows hits the pre-existing, "
-            + "unrelated issue #4/#23 shutdown DCHECK (verified: reproduces with plain OSR "
-            + "tests alone too, nothing to do with windowed mode). Re-enable once #4/#23 is "
-            + "fixed.")
     void windowedBrowserLoadsAndReportsCorrectUrl() {
         boolean[] done = {false};
+        String[] url = {null};
 
         TestFrame frame = new TestFrame() {
             @Override
@@ -149,6 +144,11 @@ class CefBrowserWrTest {
             public void onLoadingStateChange(CefBrowser browser, boolean isLoading,
                     boolean canGoBack, boolean canGoForward) {
                 if (isLoading) return;
+                // Captured here, on the CEF UI thread, rather than via
+                // frame.browser_.getURL() after awaitCompletion() returns on the
+                // JUnit thread -- see CefBrowserApiTest's onLoadingStateChange
+                // comment for the same already-documented cross-thread gotcha.
+                url[0] = browser.getURL();
                 done[0] = true;
                 terminateTest();
             }
@@ -157,6 +157,6 @@ class CefBrowserWrTest {
         frame.awaitCompletion();
 
         assertTrue(done[0], "Windowed browser never finished loading");
-        assertEquals(TEST_URL, frame.browser_.getURL());
+        assertEquals(TEST_URL, url[0]);
     }
 }

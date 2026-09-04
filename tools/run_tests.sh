@@ -39,7 +39,22 @@ else
     shift
     shift
 
-    LD_PRELOAD=libcef.so java -Djava.library.path="$LIB_PATH" -jar "${DIR}"/third_party/junit/junit-platform-console-standalone-*.jar -cp "$CLS_PATH" --select-package tests.junittests "$@"
+    # Default to the whole tests.junittests package, but only if the caller
+    # didn't pass their own JUnit console launcher selector (--select-class,
+    # --select-package, etc). JUnit ORs multiple selectors together rather
+    # than intersecting them, so appending our default alongside a caller's
+    # --select-class silently widens the run back out to the whole package.
+    SELECT_ARGS=(--select-package tests.junittests)
+    for arg in "$@"; do
+      case "$arg" in
+        --select-*|-s)
+          SELECT_ARGS=()
+          break
+          ;;
+      esac
+    done
+
+    LD_PRELOAD=libcef.so java -Djava.library.path="$LIB_PATH" -jar "${DIR}"/third_party/junit/junit-platform-console-standalone-*.jar -cp "$CLS_PATH" "${SELECT_ARGS[@]}" "$@"
   fi
 fi
 
