@@ -23,6 +23,13 @@ CefRefPtr<CefMessageRouter> GetSelf(jlong self) {
 CefRefPtr<MessageRouterHandler> GetHandler(JNIEnv* env,
                                            jobject jrouterHandler,
                                            bool allow_create) {
+  // ScopedJNIObject's attach-to-existing-handle constructor DCHECKs its
+  // handle is non-null, so a null |jrouterHandler| (a documented-legal
+  // input at every caller of this helper -- see CefMessageRouter.java's
+  // cancelPending()) must never reach it.
+  if (!jrouterHandler)
+    return nullptr;
+
   ScopedJNIObject<MessageRouterHandler> jrouterHandlerObj(
       env, jrouterHandler, false /* should_delete */,
       "CefMessageRouterHandler");
