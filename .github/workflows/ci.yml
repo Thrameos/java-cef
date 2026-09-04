@@ -88,6 +88,17 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y ninja-build libx11-dev libgtk-3-dev libnss3 libasound2t64
 
+      # Vendored gsutil under tools/buildtools (used to download clang-format)
+      # needs six.moves; not preinstalled on this image. Pin PYTHON_EXECUTABLE
+      # (which CMakeLists.txt honors directly) to the exact interpreter six
+      # was installed into -- runner images carry more than one Python, and
+      # CMake's own interpreter discovery doesn't reliably pick the same one
+      # a bare `python3` on PATH resolves to.
+      - name: Install six, pin PYTHON_EXECUTABLE
+        run: |
+          python3 -m pip install --break-system-packages six
+          echo "PYTHON_EXECUTABLE=$(python3 -c 'import sys; print(sys.executable)')" >> "$GITHUB_ENV"
+
       - name: Configure and build native (jcef)
         run: |
           mkdir -p jcef_build
@@ -206,6 +217,15 @@ jobs:
         run: |
           LIBTINFO6="$(ldconfig -p | grep -m1 'libtinfo\.so\.6' | awk '{print $NF}')"
           sudo ln -sf "$LIBTINFO6" "$(dirname "$LIBTINFO6")/libtinfo.so.5"
+
+      # Vendored gsutil under tools/buildtools (used to download clang-format)
+      # needs six.moves; not preinstalled on this image. Pin PYTHON_EXECUTABLE
+      # to the exact interpreter six was installed into -- see the test job's
+      # comment for why this is needed rather than a bare pip install.
+      - name: Install six, pin PYTHON_EXECUTABLE
+        run: |
+          python3 -m pip install --break-system-packages six
+          echo "PYTHON_EXECUTABLE=$(python3 -c 'import sys; print(sys.executable)')" >> "$GITHUB_ENV"
 
       - name: Fetch clang-18 (required by ENABLE_LLVM_COVERAGE)
         run: |
@@ -329,11 +349,18 @@ jobs:
           key: cef-${{ steps.cef-version.outputs.version }}-${{ runner.os }}
 
       # Vendored gsutil under tools/buildtools needs six.moves; not preinstalled
-      # on this image.
-      - name: Install six
-        run: python -m pip install six
+      # on this image. Pin PYTHON_EXECUTABLE to the exact interpreter six was
+      # installed into -- CMake's own interpreter discovery picked a different
+      # Python than plain `python` on PATH in the first real run of this job,
+      # so a bare pip install alone wasn't enough.
+      - name: Install six, pin PYTHON_EXECUTABLE
+        shell: bash
+        run: |
+          python -m pip install six
+          echo "PYTHON_EXECUTABLE=$(python -c 'import sys; print(sys.executable)')" >> "$GITHUB_ENV"
 
       - name: Configure and build native (jcef)
+        shell: bash
         run: |
           mkdir jcef_build
           cd jcef_build
@@ -374,9 +401,15 @@ jobs:
       # Vendored gsutil under tools/buildtools needs six.moves; not preinstalled
       # on this image. macOS's system Python 3.12+ is externally-managed (PEP
       # 668), so --break-system-packages is required for a bare pip install to
-      # succeed in this throwaway CI VM.
-      - name: Install six
-        run: python3 -m pip install --break-system-packages six
+      # succeed in this throwaway CI VM. Pin PYTHON_EXECUTABLE to the exact
+      # interpreter six was installed into -- CMake's own interpreter
+      # discovery picked a different Python (the Python.framework build) than
+      # plain `python3` on PATH in the first real run of this job, so a bare
+      # pip install alone wasn't enough.
+      - name: Install six, pin PYTHON_EXECUTABLE
+        run: |
+          python3 -m pip install --break-system-packages six
+          echo "PYTHON_EXECUTABLE=$(python3 -c 'import sys; print(sys.executable)')" >> "$GITHUB_ENV"
 
       - name: Configure and build native (jcef, invokes Ant for Java per CLAUDE.md)
         run: |
