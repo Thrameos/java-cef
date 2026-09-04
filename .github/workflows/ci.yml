@@ -313,35 +313,22 @@ jobs:
           # (SIGTRAP) under Debug, zeroing out coverage for everything that
           # would have run after them in the same process.
           #
-          # --exclude-classname CefLifeSpanPopupTest: excluded 2026-09-04 on a
-          # 2-data-point correlation (a Debug-only "Check failed:
-          # created_handle_." crash at jni_scoped_helpers.h:639 twice
-          # happened right after this test's life_span_popup.html resource
-          # loaded) that turned out to be COINCIDENTAL, not causal --
-          # disproven the same day when the identical crash recurred on all
-          # 3 retry attempts with this class excluded and never running.
-          # Left excluded anyway out of caution (still genuinely passing
-          # under the test job's Release build either way, so no coverage
-          # is lost by leaving it out here) pending a real root-cause.
-          #
-          # --exclude-classname CefRequestContextPreferencesTest: the
-          # ACTUAL trigger for the created_handle_ crash above, identified
-          # 2026-09-04 after CefLifeSpanPopupTest's exclusion was disproven
-          # -- every occurrence's log immediately preceded by this class's
-          # setPreferenceWithSettablePreferenceRoundTripsNewValue() test
-          # method (rapid multi-browser churn, ids 6-10 created/closed
-          # within ~0.5s) and its heavy CefRequestContext.getAllPreferences/
-          # setPreference() JNI value-marshalling (per that method's own
-          # comment: exercises GetCefValueFromJNIBoolean/Integer/Double/
-          # String in native/jni_util.cpp on the "Java value going in"
-          # direction) -- a very plausible source of a ScopedJNIObject
-          # wrapping a preference value whose NewJNIObject() silently failed
-          # yet still got SetTemporary() called on it. Passes cleanly under
-          # the test job's Release build (DCHECK compiled out there), same
-          # pattern as the other excluded classes. Not root-caused yet -- a
-          # real Phase 2 candidate, not a permanent home for this
-          # workaround.
-          tools/run_coverage_ci.sh 3 -- \
+          # NOT excluding CefLifeSpanPopupTest or CefRequestContextPreferencesTest:
+          # both were tried and disproven 2026-09-04 as the trigger for a
+          # Debug-only "Check failed: created_handle_." crash at
+          # jni_scoped_helpers.h:639 -- each looked correlated (crash
+          # immediately followed that class's activity) until excluding it
+          # made the identical crash recur anyway on all 3 retry attempts.
+          # Three wrong guesses in a row is strong evidence this crash isn't
+          # tied to any specific test class at all -- it's a genuine
+          # environmental/timing race in this job's Debug build, not
+          # something --exclude-classname can fix. See
+          # tools/run_coverage_ci.sh's retry loop (bumped to 5 attempts) for
+          # how this job now absorbs it instead: a deliberate, temporary
+          # compromise (per explicit user direction) to get a usable
+          # baseline while this and the three classes below get root-caused
+          # as Phase 2 candidates.
+          tools/run_coverage_ci.sh 5 -- \
             env LD_PRELOAD=libcef.so timeout 120 java \
             -Djava.library.path="$LIB_PATH" \
             -javaagent:jacocoagent.jar=destfile=jacoco.exec \
@@ -350,9 +337,7 @@ jobs:
             --exclude-tag leak-sweep --exclude-tag process-isolated \
             --exclude-classname '.*\.CefPostDataTest' \
             --exclude-classname '.*\.CefPrintSettingsTest' \
-            --exclude-classname '.*\.CefRequestContextTest' \
-            --exclude-classname '.*\.CefLifeSpanPopupTest' \
-            --exclude-classname '.*\.CefRequestContextPreferencesTest'
+            --exclude-classname '.*\.CefRequestContextTest'
 
       - name: Generate and upload coverage reports
         run: |
