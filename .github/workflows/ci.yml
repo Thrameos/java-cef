@@ -42,6 +42,10 @@ on:
   pull_request:
     branches:
       - master
+  # Lets a branch that doesn't match the push trigger's patterns above (e.g.
+  # this backport/* staging branch, before it's squashed onto master or
+  # opened as a PR) be run manually from the Actions tab for verification.
+  workflow_dispatch:
 
 jobs:
   test:
