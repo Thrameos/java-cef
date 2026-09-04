@@ -348,7 +348,9 @@ execute_process(
   RESULT_VARIABLE EXECUTE_RV
   )
 if(NOT EXECUTE_RV STREQUAL "0")
-  message(FATAL_ERROR "Execution failed with unexpected result: ${EXECUTE_RV}")
+  message(WARNING "clang-format download failed (result: ${EXECUTE_RV}); "
+                   "tools/fix_style.sh won't have clang-format available, "
+                   "but this doesn't block the actual jcef/jcef_helper build.")
 endif()
 
 

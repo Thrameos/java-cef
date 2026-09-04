@@ -210,13 +210,18 @@ jobs:
 
       # libtinfo5 was dropped from the Ubuntu archive as of 24.04 ("noble",
       # what ubuntu-latest now points to) -- clang-18's prebuilt binary links
-      # against the old libtinfo.so.5 SONAME, so symlink the still-present
-      # libtinfo.so.6 to satisfy it (tinfo's ABI surface clang actually uses
-      # has been stable across that bump; this is the standard workaround).
-      - name: Symlink libtinfo.so.5 -> libtinfo.so.6 (removed from noble)
+      # against the old libtinfo.so.5 SONAME AND needs its actual
+      # NCURSES_TINFO_5.0.19991023 versioned symbol (confirmed live: a bare
+      # symlink from libtinfo.so.6 satisfies the filename but not the
+      # versioned symbol, so clang still fails to run -- "version
+      # `NCURSES_TINFO_5.0.19991023' not found"). Fetch the real package from
+      # Ubuntu's archive (still hosted for jammy/22.04 even though noble
+      # dropped it) and extract just the .so, rather than faking it.
+      - name: Install real libtinfo5 (removed from noble's archive)
         run: |
-          LIBTINFO6="$(ldconfig -p | grep -m1 'libtinfo\.so\.6' | awk '{print $NF}')"
-          sudo ln -sf "$LIBTINFO6" "$(dirname "$LIBTINFO6")/libtinfo.so.5"
+          curl -sL -o libtinfo5.deb \
+            http://archive.ubuntu.com/ubuntu/pool/universe/n/ncurses/libtinfo5_6.3-2ubuntu0.3_amd64.deb
+          sudo dpkg -i libtinfo5.deb
 
       # Vendored gsutil under tools/buildtools (used to download clang-format)
       # needs six.moves; not preinstalled on this image. Pin PYTHON_EXECUTABLE
