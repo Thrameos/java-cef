@@ -53,9 +53,15 @@ class CefPermissionHandlerCoverageTest {
         String seenOrigin;
         int seenPermissions;
         boolean accept;
+        boolean cancelViaCallback;
 
         PermissionTestFrame(boolean accept) {
             this.accept = accept;
+        }
+
+        PermissionTestFrame(boolean accept, boolean cancelViaCallback) {
+            this.accept = accept;
+            this.cancelViaCallback = cancelViaCallback;
         }
 
         @Override
@@ -70,14 +76,26 @@ class CefPermissionHandlerCoverageTest {
                     seenPermissions = requestedPermissions;
                     if (accept) {
                         callback.Continue(requestedPermissions);
+                    } else if (cancelViaCallback) {
+                        // Exercises CefMediaAccessCallback_N.cpp's N_Cancel --
+                        // distinct from the plain-deny scenario below, which
+                        // returns false and never touches the callback object
+                        // at all (permission_handler.cpp's jresult==false /
+                        // SetTemporary() branch instead).
+                        callback.Cancel();
                     }
                     requested.countDown();
                     // Per this method's own contract: true means "handled here"
-                    // (accept path, callback used); false means "proceed with
-                    // default handling" (deny path, callback intentionally
-                    // unused) -- exercises permission_handler.cpp's other
-                    // branch (jresult==false -> jcallback.SetTemporary()).
-                    return accept;
+                    // (callback used, whether via Continue() or Cancel()); false
+                    // means "proceed with default handling" (deny path, callback
+                    // intentionally left unused) -- exercises permission_handler.
+                    // cpp's other branch (jresult==false -> jcallback.
+                    // SetTemporary()). Returning true after Cancel() (not just
+                    // after Continue()) matters here -- native's own comment on
+                    // the jresult==false branch says the callback "won't be
+                    // used" in that case, so a real Cancel() call must pair with
+                    // jresult==true, same as Continue().
+                    return accept || cancelViaCallback;
                 }
 
                 @Override
@@ -130,6 +148,24 @@ class CefPermissionHandlerCoverageTest {
     @Test
     void onRequestMediaAccessPermissionReturningFalseTakesTheDenyPath() {
         PermissionTestFrame frame = new PermissionTestFrame(false /* accept */);
+        try {
+            assertTrue(frame.requested.await(10, TimeUnit.SECONDS),
+                    "onRequestMediaAccessPermission never fired");
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        }
+        assertEquals(ORIGIN, frame.seenOrigin);
+        frame.terminateTest();
+        frame.awaitCompletion();
+    }
+
+    // CefMediaAccessCallback_N.cpp's N_Cancel was 0% covered -- the two
+    // scenarios above only exercise Continue() (accept) and the never-touches-
+    // the-callback deny path. This calls Cancel() explicitly.
+    @Test
+    void onRequestMediaAccessPermissionCanBeExplicitlyCanceledViaCallback() {
+        PermissionTestFrame frame =
+                new PermissionTestFrame(false /* accept */, true /* cancelViaCallback */);
         try {
             assertTrue(frame.requested.await(10, TimeUnit.SECONDS),
                     "onRequestMediaAccessPermission never fired");

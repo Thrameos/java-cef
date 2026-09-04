@@ -74,4 +74,45 @@ class CefDialogHandlerTest {
         assertTrue(gotDismissed[0], "onFileDialogDismissed (CefRunFileDialogCallback) was "
                 + "never invoked");
     }
+
+    // The test above only ever calls callback.Cancel() -- CefFileDialogCallback_N.cpp's
+    // N_Continue was still 0% covered. An empty file-paths list is documented as
+    // equivalent to Cancel() (see CefFileDialogCallback.Continue's javadoc), so this
+    // is still safe/headless, but it exercises N_Continue's real marshaling path
+    // (GetJNIStringVector over the (empty) jFilePaths argument) rather than N_Cancel's.
+    @Test
+    void onFileDialogContinueWithEmptyPathsInvokesNContinue() {
+        boolean[] gotFileDialog = {false};
+        boolean[] gotDismissed = {false};
+        CountDownLatch dismissed = new CountDownLatch(1);
+
+        SharedBrowserExtension.addDialogHandler(new CefDialogHandler() {
+            @Override
+            public boolean onFileDialog(CefBrowser browser, FileDialogMode mode, String title,
+                    String defaultFilePath, Vector<String> acceptFilters,
+                    Vector<String> acceptExtensions, Vector<String> acceptDescriptions,
+                    CefFileDialogCallback callback) {
+                if (gotFileDialog[0]) return true;
+                gotFileDialog[0] = true;
+                callback.Continue(new Vector<>());
+                return true;
+            }
+        });
+
+        SharedBrowserExtension.loadPage("<html><body>file dialog continue test</body></html>");
+
+        SharedBrowserExtension.browser().runFileDialog(
+                CefDialogHandler.FileDialogMode.FILE_DIALOG_OPEN, "Test Title", "", new Vector<>(),
+                0, filePaths -> {
+                    if (gotDismissed[0]) return;
+                    gotDismissed[0] = true;
+                    dismissed.countDown();
+                });
+
+        SharedBrowserExtension.awaitLatch(dismissed, 15);
+
+        assertTrue(gotFileDialog[0], "onFileDialog was never invoked");
+        assertTrue(gotDismissed[0], "onFileDialogDismissed (CefRunFileDialogCallback) was "
+                + "never invoked");
+    }
 }

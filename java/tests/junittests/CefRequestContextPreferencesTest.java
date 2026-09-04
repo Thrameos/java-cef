@@ -34,6 +34,7 @@ class CefRequestContextPreferencesTest {
     @Test
     void getAllPreferencesOnUiThreadReturnsPopulatedMap() {
         Map<String, Object>[] result = new Map[1];
+        boolean[] isGlobal = {false};
 
         TestFrame frame = new TestFrame() {
             @Override
@@ -46,7 +47,14 @@ class CefRequestContextPreferencesTest {
             @Override
             public void onAfterCreated(CefBrowser browser) {
                 super.onAfterCreated(browser);
-                result[0] = CefRequestContext.getGlobalContext().getAllPreferences(true);
+                CefRequestContext context = CefRequestContext.getGlobalContext();
+                result[0] = context.getAllPreferences(true);
+                // CefRequestContext_N.cpp's N_IsGlobal and N_HasPreference were 0%
+                // covered -- not asserted on beyond "must not throw" for
+                // hasPreference (an arbitrary key), isGlobal() is asserted since
+                // getGlobalContext() is documented to return the global instance.
+                isGlobal[0] = context.isGlobal();
+                context.hasPreference("no-such-preference-name");
                 terminateTest();
             }
         };
@@ -55,6 +63,7 @@ class CefRequestContextPreferencesTest {
 
         assertNotNull(result[0]);
         assertFalse(result[0].isEmpty());
+        assertTrue(isGlobal[0], "getGlobalContext() should report isGlobal() == true");
     }
 
     @Test

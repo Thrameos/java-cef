@@ -53,6 +53,32 @@ class CefCookieManagerTest {
         deleteAndAwait(manager, TEST_URL, "jcef_test_cookie");
     }
 
+    // CefCookieManager_N.cpp's N_VisitAllCookies was 0% covered -- every other
+    // test here uses visitUrlCookies(), a different downcall.
+    @Test
+    void setAndVisitAllCookies() throws InterruptedException {
+        CefCookieManager manager = CefCookieManager.getGlobalManager();
+
+        CefCookie cookie = new CefCookie("jcef_test_cookie_all", "jcef_test_value", "", "/",
+                false, false, new Date(), new Date(), false, null);
+        assertTrue(manager.setCookie(TEST_URL, cookie));
+
+        AtomicBoolean found = new AtomicBoolean(false);
+        CountDownLatch latch = new CountDownLatch(1);
+        manager.visitAllCookies((visited, count, total, delete) -> {
+            if ("jcef_test_cookie_all".equals(visited.name)) {
+                found.set(true);
+                latch.countDown();
+            }
+            return true;
+        });
+
+        assertTrue(latch.await(10, TimeUnit.SECONDS), "visitAllCookies callback timed out");
+        assertTrue(found.get(), "Previously-set cookie was not visited by visitAllCookies");
+
+        deleteAndAwait(manager, TEST_URL, "jcef_test_cookie_all");
+    }
+
     @Test
     void deleteCookies() throws InterruptedException {
         CefCookieManager manager = CefCookieManager.getGlobalManager();

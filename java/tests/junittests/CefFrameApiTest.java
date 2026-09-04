@@ -55,6 +55,10 @@ class CefFrameApiTest {
                 isMain[0] = mainFrame.isMain();
                 isValid[0] = mainFrame.isValid();
                 parent[0] = mainFrame.getParent();
+                // CefFrame_N.cpp's N_IsFocused was 0% covered -- not asserted on
+                // (focus state is timing/window-manager dependent under OSR in
+                // this headless sandbox), just exercised.
+                mainFrame.isFocused();
 
                 mainFrame.executeJavaScript("1+1;", url[0], 1);
                 mainFrame.undo();

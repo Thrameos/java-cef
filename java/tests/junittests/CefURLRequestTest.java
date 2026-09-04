@@ -94,6 +94,12 @@ class CefURLRequestTest {
         // request was never awaited), the accessor itself must not fail.
         assertNotNull(urlRequest.getRequestStatus());
 
+        // CefURLRequest_N.cpp's N_GetRequestError and N_GetResponse were 0%
+        // covered -- same "accessor must not fail" rationale as getRequestStatus()
+        // above; not asserting a specific value, this request was never awaited.
+        urlRequest.getRequestError();
+        urlRequest.getResponse();
+
         urlRequest.cancel();
         urlRequest.dispose();
     }

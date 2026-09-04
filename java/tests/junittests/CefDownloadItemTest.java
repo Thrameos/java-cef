@@ -148,4 +148,67 @@ class CefDownloadItemTest {
         assertTrue(targetFile.exists(), "Downloaded file does not exist on disk: " + targetFile);
         assertEquals(DOWNLOAD_CONTENT, new String(Files.readAllBytes(targetFile.toPath())));
     }
+
+    // CefDownloadItemCallback_N.cpp's N_Cancel was 0% covered -- the test above
+    // only ever calls pause()/resume() and lets the download complete. Separate
+    // download so cancellation here can't race the completion path above.
+    private static final String CANCEL_DOWNLOAD_URL = "http://test.com/download-cancel.bin";
+
+    @Test
+    void cancelDuringDownloadInvokesNCancel() throws Exception {
+        boolean[] gotBeforeDownload = {false};
+        boolean[] gotCanceled = {false};
+
+        File targetFile = File.createTempFile("jcef-download-cancel-test-", ".bin");
+        targetFile.delete();
+        targetFile.deleteOnExit();
+
+        TestFrame frame = new TestFrame() {
+            @Override
+            protected void setupTest() {
+                HashMap<String, String> headers = new HashMap<>();
+                headers.put("Content-Disposition", "attachment; filename=\"test-cancel.bin\"");
+                addResource(CANCEL_DOWNLOAD_URL, DOWNLOAD_CONTENT, "application/octet-stream",
+                        headers);
+
+                client_.addDownloadHandler(new CefDownloadHandler() {
+                    @Override
+                    public boolean onBeforeDownload(CefBrowser browser,
+                            CefDownloadItem downloadItem, String suggestedName_,
+                            CefBeforeDownloadCallback callback) {
+                        if (gotBeforeDownload[0]) return true;
+                        gotBeforeDownload[0] = true;
+                        callback.Continue(targetFile.getAbsolutePath(), false /* showDialog */);
+                        return true;
+                    }
+
+                    @Override
+                    public void onDownloadUpdated(CefBrowser browser,
+                            CefDownloadItem downloadItem, CefDownloadItemCallback callback) {
+                        if (gotCanceled[0] || !downloadItem.isValid()) return;
+
+                        if (downloadItem.isCanceled()) {
+                            gotCanceled[0] = true;
+                            terminateTest();
+                            return;
+                        }
+
+                        if (!downloadItem.isComplete()) {
+                            gotCanceled[0] = true;
+                            callback.cancel();
+                            terminateTest();
+                        }
+                    }
+                });
+
+                createBrowser(CANCEL_DOWNLOAD_URL, true /* useOSR */);
+                super.setupTest();
+            }
+        };
+
+        frame.awaitCompletion();
+
+        assertTrue(gotBeforeDownload[0], "onBeforeDownload was never invoked");
+        assertTrue(gotCanceled[0], "Download was never canceled");
+    }
 }

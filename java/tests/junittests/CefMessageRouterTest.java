@@ -41,6 +41,19 @@ class CefMessageRouterTest {
 
         CefMessageRouterHandlerAdapter handler = new CefMessageRouterHandlerAdapter() {};
         assertTrue(router.addHandler(handler, true));
+
+        // CefMessageRouter_N.cpp's N_CancelPending was 0% covered. Scoped to
+        // this specific (browser=null, handler=<ours>) pair rather than
+        // (null, null) -- (null, null) cancels ALL pending queries process-
+        // wide and was found (empirically, isolated single-class run) to hit
+        // a native DCHECK(handle) in jni_scoped_helpers.h:681 when run as
+        // part of this suite, most likely by trying to notify some other,
+        // unrelated router/handler whose Java-side reference is no longer
+        // live. Not root-caused further -- out of scope for a coverage pass;
+        // this narrower form still reaches the same N_CancelPending downcall
+        // safely, since this handler genuinely has no pending queries.
+        router.cancelPending(null, handler);
+
         assertTrue(router.removeHandler(handler));
 
         router.dispose();
