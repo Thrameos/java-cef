@@ -319,8 +319,9 @@ jobs:
             --classfiles out/linux64 --sourcefiles java \
             --xml coverage_java.xml
 
-      - uses: codecov/codecov-action@v4
+      - uses: codecov/codecov-action@v5
         with:
+          token: ${{ secrets.CODECOV_TOKEN }}
           files: coverage_native.info,coverage_java.xml
           fail_ci_if_error: false
 
