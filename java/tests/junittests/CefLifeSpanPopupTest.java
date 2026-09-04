@@ -9,50 +9,43 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.cef.browser.CefBrowser;
 import org.cef.browser.CefFrame;
-import org.junit.jupiter.api.Disabled;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 
 // Exercises native/life_span_handler.cpp's LifeSpanHandler::OnBeforePopup
 // (0% covered -- no existing test triggers it), via a real window.open() call.
 //
-// @Disabled: root-caused, and it's not fixable by changing anything about how
-// this test triggers window.open(). Two synthetic-input techniques were tried
-// first (a bare inline <script> at page load, then a real synthetic mouse
-// click matching CefContextMenuTest's technique) and both hung. A diagnostic
-// (document.title changes, observed via CefDisplayHandler.onTitleChange)
-// showed the synthetic click *does* land and *does* run the onclick handler.
-// Suspecting Blink's user-activation tracking wasn't satisfied by synthetic
-// OSR input, CEF's own test-only CefExecuteJavaScriptWithUserGestureForTests()
-// (include/test/cef_test_helpers.h -- see life_span_unittest.cc in
-// ~/devel/cef/tests/ceftests/, which uses exactly this instead of synthetic
-// input) was bound for JCEF (CefTestHelper.java/native/CefTestHelper.cpp) and
-// tried too. Same result: the JS ran to completion (title changed all the way
-// to 'clicked'), yet OnBeforePopup still never fired.
-//
-// The real root cause: native/life_span_handler.cpp's OnBeforePopup has
+// Root cause of the original hang, now resolved: native/life_span_handler.cpp's
+// OnBeforePopup has
 //     if (browser->GetHost()->IsWindowRenderingDisabled()) {
 //       // Cancel popups in off-screen rendering mode.
 //       return true;
 //     }
 // at the very top, unconditionally returning before ever reaching the
-// JNI_CALL_METHOD that would invoke Java's onBeforePopup(). window.open() DID
-// fire in the renderer (confirmed by the title-change diagnostic completing);
-// CEF's browser-process side simply never surfaces it to JCEF for OSR
-// browsers. This has nothing to do with user gestures -- that whole
-// investigation path was a red herring. Since createBrowser(..., true) (OSR)
-// is what every popup test uses, this JNI dispatch is unreachable code under
-// OSR no matter what triggers the JS. Covering it requires a *windowed*
-// (non-OSR) browser -- but CefBrowserWrTest (added specifically as the first
-// windowed-browser test) found windowed browsers hang on close, so this test
-// is blocked on that same root cause. See plan/roadmap.md's NEXT-UP PLAN item
-// 2 and CefBrowserWrTest's own @Disabled note.
+// JNI_CALL_METHOD that would invoke Java's onBeforePopup(). Two synthetic-
+// input techniques (a bare inline <script> at page load, then a real
+// synthetic mouse click matching CefContextMenuTest's technique) and CEF's
+// own test-only CefExecuteJavaScriptWithUserGestureForTests() (include/
+// test/cef_test_helpers.h, bound for JCEF as CefTestHelper.java/
+// native/CefTestHelper.cpp) were all tried against an OSR browser first --
+// none of them helped, because the JNI dispatch is unreachable code under
+// OSR no matter what triggers the JS. See git history for that investigation
+// path (kept in the repeated task's own history) -- the user-gesture
+// dimension was a red herring, but CefTestHelper's binding is still real,
+// working, CEF-verified infrastructure, reused below to make the click
+// deterministic instead of relying on window-focus/timing.
 //
-// CefTestHelper's user-gesture binding is left in place (it's real, working,
-// CEF-verified infrastructure -- confirmed executing JS under a genuine faked
-// gesture) even though it turned out not to be this test's actual blocker; it
-// may still be needed for other user-activation-gated coverage later (e.g.
-// onbeforeunload dialogs).
+// Covering this requires a *windowed* (non-OSR) browser, which was itself
+// blocked on CefBrowserWrTest's close hang -- see
+// plan/tasks/20260903-03-issue3-windowed-close-onbeforeclose.md, now fixed
+// and re-enabled. This test follows the same windowed-browser pattern.
+//
+// Note: running this class standalone still ends in a native SIGABRT during
+// suite-level JVM shutdown (same symptom class as the already-tracked GH #10
+// / #4/#23 shutdown crash -- see CefBrowserWrTest's own comment and
+// plan/tasks/20260903-01-gh10-shutdown-sigsegv.md). That crash fires only
+// after this test's own assertions have already completed and JUnit has
+// reported it passing; it is unrelated to OnBeforePopup or popups.
 @ExtendWith(TestSetupExtension.class)
 class CefLifeSpanPopupTest {
     private static final String TEST_URL = "http://test.com/life_span_popup.html";
@@ -64,10 +57,6 @@ class CefLifeSpanPopupTest {
             + "</body></html>";
 
     @Test
-    @Disabled("OnBeforePopup is unreachable for OSR browsers -- native/life_span_handler.cpp "
-            + "unconditionally cancels+returns before the JNI dispatch when "
-            + "IsWindowRenderingDisabled(). Needs a windowed browser, which is itself blocked "
-            + "on CefBrowserWrTest's close hang. See the class-level comment.")
     void clickingOpenerInvokesOnBeforePopupAndIsCancelled() {
         boolean[] fired = {false};
         String[] receivedUrl = {null};
@@ -77,7 +66,7 @@ class CefLifeSpanPopupTest {
             @Override
             protected void setupTest() {
                 addResource(TEST_URL, CONTENT, "text/html");
-                createBrowser(TEST_URL, true /* useOSR */);
+                createBrowser(TEST_URL, false /* useOSR */);
                 super.setupTest();
             }
 
