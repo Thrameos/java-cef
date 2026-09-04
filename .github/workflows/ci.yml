@@ -271,12 +271,20 @@ jobs:
       # strictly after every real test has already run. Individual test results
       # and their coverage data are unaffected -- each process's own .profraw file
       # (LLVM_PROFILE_FILE) is written incrementally, not just at a final atexit
-      # flush like gcov, so this doesn't lose data the way the old gcov setup did
-      # -- but this step's own exit code is still non-zero, so continue-on-error
-      # keeps this from hard-blocking the job while that separately-tracked issue
-      # is unresolved.
+      # flush like gcov, so this doesn't lose data the way the old gcov setup did.
+      #
+      # This step used to blanket continue-on-error to tolerate that one known
+      # crash -- but that also silently swallowed a *different*, previously
+      # unseen crash (jni_scoped_helpers.h:639 "Check failed: created_handle_.",
+      # found live 2026-09-04) that aborts mid-suite, before JUnit's summary
+      # ever prints, truncating coverage data for everything that would have
+      # run afterward. Distinguish the two the same way run_tests_ci.sh does
+      # for the test job: a JUnit summary in the output means every test
+      # already ran and reported (so a nonzero exit after that point is the
+      # known post-summary shutdown race, tolerated) -- no summary means
+      # something crashed mid-run, which is a real problem and must fail the
+      # job, not go green silently.
       - name: Run JUnit test bench under JaCoCo agent
-        continue-on-error: true
         run: |
           export DISPLAY=:99
           eval $(dbus-launch --sh-syntax)
@@ -312,6 +320,7 @@ jobs:
           # crash is what caused the first real run of this job to report a
           # bogus 0% Java coverage number. Not a fix, matches the workaround
           # already established and documented for this exact issue.
+          LOGFILE="$(mktemp)"
           LD_PRELOAD=libcef.so timeout 120 java \
             -Djava.library.path="$LIB_PATH" \
             -javaagent:jacocoagent.jar=destfile=jacoco.exec \
@@ -320,7 +329,43 @@ jobs:
             --exclude-tag leak-sweep --exclude-tag process-isolated \
             --exclude-classname '.*\.CefPostDataTest' \
             --exclude-classname '.*\.CefPrintSettingsTest' \
-            --exclude-classname '.*\.CefRequestContextTest'
+            --exclude-classname '.*\.CefRequestContextTest' \
+            2>&1 | tee "$LOGFILE"
+          RAW_EXIT=${PIPESTATUS[0]}
+
+          TESTS_FOUND=$(grep -oE '[0-9]+ tests found' "$LOGFILE" | grep -oE '^[0-9]+' | tail -1)
+          TESTS_FAILED=$(grep -oE '[0-9]+ tests failed' "$LOGFILE" | grep -oE '^[0-9]+' | tail -1)
+          rm -f "$LOGFILE"
+
+          if [ -z "$TESTS_FOUND" ] || [ -z "$TESTS_FAILED" ]; then
+            echo
+            echo "coverage job: no JUnit summary found in output -- the process" \
+                 "crashed or hung before any test could report a result. This is" \
+                 "NOT the known post-summary shutdown race (that one only ever" \
+                 "happens after every test has already reported) -- treating as" \
+                 "a real failure (raw exit code $RAW_EXIT)."
+            exit 1
+          fi
+
+          if [ "$TESTS_FAILED" -gt 0 ]; then
+            echo
+            echo "coverage job: $TESTS_FAILED/$TESTS_FOUND test(s) failed. Real" \
+                 "test failure(s) -- see the JUnit tree above for which."
+            exit 1
+          fi
+
+          if [ "$RAW_EXIT" -ne 0 ]; then
+            echo
+            echo "coverage job: all $TESTS_FOUND test(s) passed, but the process" \
+                 "exited nonzero ($RAW_EXIT) after JUnit's summary was printed." \
+                 "This is the known, pre-existing native shutdown-race crash" \
+                 "(see plan/state.md), not a test regression or a coverage-data" \
+                 "problem -- every test already reported before this point."
+            exit 0
+          fi
+
+          echo
+          echo "coverage job: all $TESTS_FOUND test(s) passed, clean exit."
 
       - name: Generate and upload coverage reports
         run: |
