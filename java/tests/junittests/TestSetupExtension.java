@@ -91,24 +91,29 @@ public class TestSetupExtension
         // Initialize the singleton CefApp instance.
         CefSettings settings = new CefSettings();
 
-        // tools/run_leak_sweep_isolated.sh (see plan/LeakCheckerPort.md's
-        // pooling-design status) launches one fresh JVM+CEF subprocess per
+        // LeakSweepIsolatedTest (via IsolatedRunner/LeakSweepTargetTask, see
+        // those classes' comments) launches one fresh JVM+CEF subprocess per
         // leak-sweep target and hard-exits via Runtime.halt() as soon as
         // that target's result is known, skipping this class's own close()
-        // (CefApp.dispose()) deliberately -- see LeakSweepTest.java's
-        // isolated-mode comment for why. Left at the default (null)
-        // root_cache_path, every subprocess shares the same profile
-        // directory and its SingletonLock; a process that hard-exits
-        // instead of shutting down gracefully doesn't get a chance to
-        // release that lock the normal way, so the *next* subprocess to
-        // start can trip CEF's singleton-collision fatal path (observed
-        // directly: 7 of 8 non-control targets crashed with SIGTRAP on
-        // startup, no output, in the first full isolated-sweep run before
-        // this fix). -Dleak.cachePath=<dir>, set by the driver script to a
-        // fresh per-subprocess directory, routes around the shared profile
-        // entirely rather than trying to make hard-exit-then-immediately-
-        // restart safe against a lock this process never releases.
+        // (CefApp.dispose()) deliberately -- see IsolatedTaskRunnerTest's
+        // halt() comment for why. Left at the default (null) root_cache_path,
+        // every subprocess shares the same profile directory and its
+        // SingletonLock; a process that hard-exits instead of shutting down
+        // gracefully doesn't get a chance to release that lock the normal
+        // way, so the *next* subprocess to start can trip CEF's
+        // singleton-collision fatal path (observed directly: 7 of 8
+        // non-control targets crashed with SIGTRAP on startup, no output, in
+        // the first full isolated-sweep run before this fix).
+        // leak.cachePath, set by LeakSweepIsolatedTest to a fresh
+        // per-subprocess directory (as an env var, not a system property --
+        // see IsolatedRunner's class comment for why only env vars reach
+        // this process), routes around the shared profile entirely rather
+        // than trying to make hard-exit-then-immediately-restart safe
+        // against a lock this process never releases.
         String isolatedCachePath = System.getProperty("leak.cachePath");
+        if (isolatedCachePath == null || isolatedCachePath.isEmpty()) {
+            isolatedCachePath = System.getenv("leak.cachePath");
+        }
         if (isolatedCachePath != null && !isolatedCachePath.isEmpty()) {
             settings.root_cache_path = isolatedCachePath;
             settings.cache_path = isolatedCachePath;

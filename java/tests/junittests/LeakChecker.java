@@ -181,7 +181,16 @@ class LeakChecker {
     private static final long DEFAULT_ABORT_RSS_BYTES = 3_000_000_000L;
 
     private static long abortRssBytes() {
+        // Checked as a system property first (the normal in-process full
+        // sweep's convention), falling back to the identically-named
+        // environment variable -- IsolatedRunner-dispatched child processes
+        // (see LeakSweepTargetTask) can only pass extra config as env vars,
+        // since tools/run_tests.sh has no route for a `-D` JVM flag (see
+        // IsolatedRunner's class comment).
         String override = System.getProperty("leak.abortRssBytes");
+        if (override == null) {
+            override = System.getenv("leak.abortRssBytes");
+        }
         if (override != null) {
             try {
                 return Long.parseLong(override);
