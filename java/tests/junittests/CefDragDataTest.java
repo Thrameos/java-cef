@@ -17,7 +17,7 @@ import java.util.Vector;
 
 // Test the TestFrame implementation.
 @ExtendWith(TestSetupExtension.class)
-class DragDataTest {
+class CefDragDataTest {
     @Test
     void createEmpty() {
         CefDragData dragData = CefDragData.create();
@@ -93,6 +93,21 @@ class DragDataTest {
         assertFalse(dragData.isLink());
         assertTrue(dragData.isFile());
         assertFalse(dragData.isFragment());
+
+        // CefDragData_N.cpp's N_GetFilePaths and N_ResetFileContents were 0%
+        // covered -- GetFileNames() (already exercised above) is a distinct
+        // downcall from GetFilePaths().
+        Vector<String> filePaths = new Vector<>();
+        assertTrue(dragData.getFilePaths(filePaths));
+        assertEquals(2, filePaths.size());
+        assertEquals(path1, filePaths.get(0));
+        assertEquals(path2, filePaths.get(1));
+
+        // No documented postcondition on IsFile()/GetFileNames() afterward (CEF's
+        // own header just says "reset the file contents" -- used before
+        // DragTargetDragEnter for drag-out scenarios); just confirm the call
+        // itself doesn't throw and doesn't disturb the file-paths view above.
+        dragData.resetFileContents();
 
         // Explicit cleanup to avoid memory leaks.
         dragData.dispose();
