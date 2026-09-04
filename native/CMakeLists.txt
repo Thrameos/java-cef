@@ -36,6 +36,7 @@ set(JCEF_SRCS
   CefFileDialogCallback_N.h
   CefFrame_N.cpp
   CefFrame_N.h
+  CefTestHelper.cpp
   CefJSDialogCallback_N.h
   CefJSDialogCallback_N.cpp
   CefMenuModel_N.cpp
