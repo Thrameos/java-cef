@@ -160,20 +160,12 @@ if(ENABLE_LLVM_COVERAGE AND NOT CMAKE_SYSTEM_NAME STREQUAL "Windows")
   endif()
 endif()
 
-# AddressSanitizer instrumentation for the jcef target (native/*.cpp only, not the
-# vendored libcef_dll_wrapper/libcef.so -- those aren't built with ASan, so this can
-# only catch bad memory accesses that originate in this repo's own native/ code, not
-# inside CEF itself). Linux/GCC-Clang only; not supported on Windows here. Meant as
-# a one-off debugging build (run a small, targeted repro under it), not for routine
-# use -- ASan roughly doubles memory use and slows execution noticeably, and its
-# runtime (libasan) generally needs to be first in the process via LD_PRELOAD.
-option(ENABLE_ASAN "Enable AddressSanitizer instrumentation for the jcef target" OFF)
-if(ENABLE_ASAN AND NOT CMAKE_SYSTEM_NAME STREQUAL "Windows")
-  if(NOT CMAKE_BUILD_TYPE STREQUAL "Debug")
-    message(WARNING "ENABLE_ASAN set -- forcing Debug build")
-    set(CMAKE_BUILD_TYPE "Debug" CACHE STRING "" FORCE)
-  endif()
-endif()
+# Builds tools_native/leak_probe and tools_native/jni_noop_probe, two
+# standalone diagnostic binaries used only by the leak-checker test harness
+# (java/tests/junittests/LeakSweepTest.java, tag "leak-sweep" -- excluded
+# from normal CI runs). Off by default so a routine `cmake .. && ninja jcef`
+# doesn't pay the build cost for tooling most consumers will never run.
+option(ENABLE_LEAK_CHECKER "Build the leak-checker diagnostic probes (tools_native/)" OFF)
 
 # Use folders in the resulting project files.
 set_property(GLOBAL PROPERTY OS_FOLDERS ON)

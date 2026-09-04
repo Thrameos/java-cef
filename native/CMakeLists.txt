@@ -243,21 +243,26 @@ if(OS_LINUX)
   set_target_properties(${JCEF_HELPER_TARGET} PROPERTIES INSTALL_RPATH "$ORIGIN")
   set_target_properties(${JCEF_HELPER_TARGET} PROPERTIES BUILD_WITH_INSTALL_RPATH TRUE)
 
-  # Standalone diagnostic, not part of the JCEF product -- lives under
-  # tools_native/ (not native/) so it's never mistaken for shipped source;
-  # see tools_native/leak_probe/leak_probe.cc's own comment and
-  # plan/LeakCheckerPort.md's 2026-08-30 status. The two-argument form
-  # points at an out-of-tree source directory while still nesting its
-  # build output under this directory's own binary dir, inheriting
-  # CEF_TARGET_OUT_DIR/libcef_lib/libcef_dll_wrapper from this scope.
-  add_subdirectory(${CMAKE_SOURCE_DIR}/tools_native/leak_probe
-                    ${CMAKE_CURRENT_BINARY_DIR}/leak_probe)
+  # Standalone diagnostics, not part of the JCEF product -- live under
+  # tools_native/ (not native/) so they're never mistaken for shipped
+  # source; see tools_native/leak_probe/leak_probe.cc's own comment and
+  # plan/LeakCheckerPort.md's 2026-08-30 status. Gated behind
+  # ENABLE_LEAK_CHECKER (see CMakeLists.txt) so a routine build doesn't pay
+  # for tooling most consumers will never run. The two-argument
+  # add_subdirectory() form points at an out-of-tree source directory while
+  # still nesting build output under this directory's own binary dir,
+  # inheriting CEF_TARGET_OUT_DIR/libcef_lib/libcef_dll_wrapper from this
+  # scope.
+  if(ENABLE_LEAK_CHECKER)
+    add_subdirectory(${CMAKE_SOURCE_DIR}/tools_native/leak_probe
+                      ${CMAKE_CURRENT_BINARY_DIR}/leak_probe)
 
-  # Same reasoning as leak_probe above -- see
-  # tools_native/jni_noop_probe/JniNoOpProbe.cpp's own comment. Its own
-  # separate .so, never linked into libjcef.so.
-  add_subdirectory(${CMAKE_SOURCE_DIR}/tools_native/jni_noop_probe
-                    ${CMAKE_CURRENT_BINARY_DIR}/jni_noop_probe)
+    # Same reasoning as leak_probe above -- see
+    # tools_native/jni_noop_probe/JniNoOpProbe.cpp's own comment. Its own
+    # separate .so, never linked into libjcef.so.
+    add_subdirectory(${CMAKE_SOURCE_DIR}/tools_native/jni_noop_probe
+                      ${CMAKE_CURRENT_BINARY_DIR}/jni_noop_probe)
+  endif()
 
   # JCEF library target.
   add_library(${JCEF_TARGET} SHARED ${JCEF_SRCS})
@@ -475,10 +480,4 @@ if(ENABLE_LLVM_COVERAGE AND NOT OS_WINDOWS)
   target_compile_options(${JCEF_TARGET} PRIVATE -fprofile-instr-generate -fcoverage-mapping -O0 -g)
   target_link_options(${JCEF_TARGET} PRIVATE -fprofile-instr-generate -fcoverage-mapping)
   target_compile_definitions(${JCEF_TARGET} PRIVATE JCEF_LLVM_COVERAGE)
-endif()
-
-# See CMakeLists.txt's ENABLE_ASAN option.
-if(ENABLE_ASAN AND NOT OS_WINDOWS)
-  target_compile_options(${JCEF_TARGET} PRIVATE -fsanitize=address -fno-omit-frame-pointer -g -O0)
-  target_link_options(${JCEF_TARGET} PRIVATE -fsanitize=address)
 endif()
