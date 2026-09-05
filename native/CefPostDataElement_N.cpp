@@ -61,6 +61,11 @@ Java_org_cef_network_CefPostDataElement_1N_N_1SetToFile(JNIEnv* env,
   CefRefPtr<CefPostDataElement> dataElement = GetSelf(self);
   if (!dataElement)
     return;
+  // CefPostDataElement::SetToFile() DCHECKs a non-empty fileName (and no-ops
+  // on an empty one right after), so skip the call entirely for a null Java
+  // string.
+  if (!jfilename)
+    return;
   dataElement->SetToFile(GetJNIString(env, jfilename));
 }
 

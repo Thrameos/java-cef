@@ -70,6 +70,10 @@ Java_org_cef_network_CefRequest_1N_N_1SetURL(JNIEnv* env,
   CefRefPtr<CefRequest> request = GetSelf(self);
   if (!request)
     return;
+  // CefRequest::SetURL() DCHECKs a non-empty url (and no-ops on an empty one
+  // right after), so skip the call entirely for a null Java string.
+  if (!jurl)
+    return;
   request->SetURL(GetJNIString(env, jurl));
 }
 
@@ -204,6 +208,11 @@ Java_org_cef_network_CefRequest_1N_N_1SetMethod(JNIEnv* env,
   CefRefPtr<CefRequest> request = GetSelf(self);
   if (!request)
     return;
+  // CefRequest::SetMethod() DCHECKs a non-empty method (and no-ops on an
+  // empty one right after), so skip the call entirely for a null Java
+  // string rather than passing through an empty CefString.
+  if (!jmethod)
+    return;
   request->SetMethod(GetJNIString(env, jmethod));
 }
 
@@ -257,6 +266,10 @@ Java_org_cef_network_CefRequest_1N_N_1SetHeaderByName(JNIEnv* env,
   CefRefPtr<CefRequest> request = GetSelf(self);
   if (!request)
     return;
+  // CefRequest::SetHeaderByName() DCHECKs a non-empty name (and no-ops on an
+  // empty one right after), so skip the call entirely for a null Java name.
+  if (!jname)
+    return;
   return request->SetHeaderByName(GetJNIString(env, jname),
                                   GetJNIString(env, jvalue),
                                   joverride != JNI_FALSE);
@@ -309,8 +322,14 @@ Java_org_cef_network_CefRequest_1N_N_1Set(JNIEnv* env,
     postDataObj.SetHandle(jpostData, false /* should_delete */);
   }
 
-  request->Set(GetJNIString(env, jurl), GetJNIString(env, jmethod),
-               postDataObj.GetCefObject(), headerMap);
+  // CefRequest::Set() DCHECKs non-empty url and method (and no-ops on either
+  // being empty right after), so skip the call entirely for a null Java
+  // string -- the SetHeaderMap() call above has no such restriction and
+  // should still happen regardless.
+  if (jurl && jmethod) {
+    request->Set(GetJNIString(env, jurl), GetJNIString(env, jmethod),
+                 postDataObj.GetCefObject(), headerMap);
+  }
 }
 
 JNIEXPORT jint JNICALL
