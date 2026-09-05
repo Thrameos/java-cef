@@ -1,0 +1,115 @@
+// Copyright (c) 2026 The Chromium Embedded Framework Authors. All rights
+// reserved. Use of this source code is governed by a BSD-style license that
+// can be found in the LICENSE file.
+
+package tests.junittests;
+
+import static org.junit.jupiter.api.Assertions.assertTrue;
+
+import org.cef.browser.CefBrowser;
+import org.cef.handler.CefDisplayHandlerAdapter;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
+
+import java.awt.Component;
+import java.awt.event.MouseWheelEvent;
+import java.util.concurrent.CountDownLatch;
+
+// Regression test for upstream chromiumembedded/java-cef#26 / this repo's
+// #14: mouse wheel direction was inverted in OSR mode.
+// native/CefBrowser_N.cpp's N_SendMouseWheelEvent used to pass the raw AWT
+// MouseWheelEvent.getWheelRotation() value straight through as CEF's deltaY
+// with no sign adjustment. AWT's convention (positive wheelRotation = wheel
+// rotated away from the user, the typical "scroll down" gesture) is the
+// opposite sign of what Chromium's CefMouseEvent deltaY convention expects
+// for the same gesture. Fixed by negating delta before assigning it to
+// deltaX/deltaY.
+@ExtendWith(TestSetupExtension.class)
+class OsrMouseWheelDirectionTest {
+    // window.scrollY on an OSR browser is a non-integer float (device-pixel-
+    // ratio rounding), so titles carry it as a double, not an int.
+    private static final String CONTENT = "<html><body style='margin:0'>"
+            + "<div style='height:5000px'>tall content</div>"
+            + "<script>"
+            + "window.scrollTo(0, 500);"
+            + "requestAnimationFrame(function() {"
+            + "  requestAnimationFrame(function() {"
+            + "    document.title = 'ready:' + window.scrollY;"
+            + "    window.addEventListener('scroll', function() {"
+            + "      document.title = 'scrolled:' + window.scrollY;"
+            + "    }, {once: true});"
+            + "  });"
+            + "});"
+            + "</script></body></html>";
+
+    @Test
+    void positiveWheelRotationScrollsDown() {
+        final String testUrl = "http://test.com/osr_wheel_test.html";
+        double[] initialScrollY = {-1};
+        double[] finalScrollY = {-1};
+        boolean[] dispatchedWheel = {false};
+        boolean[] gotScrollEvent = {false};
+        CountDownLatch done = new CountDownLatch(1);
+
+        TestFrame frame = new TestFrame() {
+            @Override
+            protected void setupTest() {
+                addResource(testUrl, CONTENT, "text/html");
+                client_.addDisplayHandler(new CefDisplayHandlerAdapter() {
+                    @Override
+                    public void onTitleChange(CefBrowser browser, String title) {
+                        if (title.startsWith("ready:") && !dispatchedWheel[0]) {
+                            try {
+                                initialScrollY[0] =
+                                        Double.parseDouble(title.substring("ready:".length()));
+                            } catch (NumberFormatException e) {
+                                // Leave dispatchedWheel[0] false; the
+                                // post-awaitCompletion assertion below
+                                // reports this as a clean test failure
+                                // instead of an uncaught exception on the
+                                // native callback thread.
+                                return;
+                            }
+                            dispatchedWheel[0] = true;
+
+                            Component canvas = browser.getUIComponent();
+                            canvas.requestFocusInWindow();
+                            long now = System.currentTimeMillis();
+                            // getWheelRotation() > 0: AWT's "wheel rotated
+                            // away from the user" convention, i.e. a normal
+                            // "scroll down" gesture in every native
+                            // application/browser.
+                            for (int i = 0; i < 5; i++) {
+                                canvas.dispatchEvent(new MouseWheelEvent(canvas,
+                                        MouseWheelEvent.MOUSE_WHEEL, now + i, 0, 50, 50, 0, false,
+                                        MouseWheelEvent.WHEEL_UNIT_SCROLL, 10, 10));
+                            }
+                        } else if (title.startsWith("scrolled:") && !gotScrollEvent[0]) {
+                            try {
+                                finalScrollY[0] =
+                                        Double.parseDouble(title.substring("scrolled:".length()));
+                            } catch (NumberFormatException e) {
+                                return;
+                            }
+                            gotScrollEvent[0] = true;
+                            done.countDown();
+                            terminateTest();
+                        }
+                    }
+                });
+                createBrowser(testUrl, true /* useOSR */);
+                super.setupTest();
+            }
+        };
+
+        frame.awaitCompletion();
+
+        assertTrue(dispatchedWheel[0],
+                "Never reached the ready state to dispatch the wheel event");
+        assertTrue(gotScrollEvent[0],
+                "Page never reported a scroll event after the synthetic wheel event");
+        assertTrue(finalScrollY[0] > initialScrollY[0],
+                "A positive (AWT 'scroll down') wheel rotation should increase window.scrollY "
+                        + "-- got initial=" + initialScrollY[0] + " final=" + finalScrollY[0]);
+    }
+}
