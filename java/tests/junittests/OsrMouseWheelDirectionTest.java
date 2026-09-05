@@ -59,9 +59,18 @@ class OsrMouseWheelDirectionTest {
                     @Override
                     public void onTitleChange(CefBrowser browser, String title) {
                         if (title.startsWith("ready:") && !dispatchedWheel[0]) {
+                            try {
+                                initialScrollY[0] =
+                                        Double.parseDouble(title.substring("ready:".length()));
+                            } catch (NumberFormatException e) {
+                                // Leave dispatchedWheel[0] false; the
+                                // post-awaitCompletion assertion below
+                                // reports this as a clean test failure
+                                // instead of an uncaught exception on the
+                                // native callback thread.
+                                return;
+                            }
                             dispatchedWheel[0] = true;
-                            initialScrollY[0] =
-                                    Double.parseDouble(title.substring("ready:".length()));
 
                             Component canvas = browser.getUIComponent();
                             canvas.requestFocusInWindow();
@@ -76,9 +85,13 @@ class OsrMouseWheelDirectionTest {
                                         MouseWheelEvent.WHEEL_UNIT_SCROLL, 10, 10));
                             }
                         } else if (title.startsWith("scrolled:") && !gotScrollEvent[0]) {
+                            try {
+                                finalScrollY[0] =
+                                        Double.parseDouble(title.substring("scrolled:".length()));
+                            } catch (NumberFormatException e) {
+                                return;
+                            }
                             gotScrollEvent[0] = true;
-                            finalScrollY[0] =
-                                    Double.parseDouble(title.substring("scrolled:".length()));
                             done.countDown();
                             terminateTest();
                         }
