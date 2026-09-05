@@ -185,7 +185,21 @@ class CefDownloadItemTest {
                     @Override
                     public void onDownloadUpdated(CefBrowser browser,
                             CefDownloadItem downloadItem, CefDownloadItemCallback callback) {
-                        if (gotCanceled[0] || !downloadItem.isValid()) return;
+                        // CEF can deliver a preliminary onDownloadUpdated() notification
+                        // before onBeforeDownload() has actually been dispatched to this
+                        // handler (confirmed live: native OnDownloadUpdated firing with a
+                        // valid, not-yet-complete CefDownloadItem while native
+                        // OnBeforeDownload had not fired at all). Reacting to that
+                        // notification here -- as this method used to, treating
+                        // "not complete" as "must actively cancel it" -- raced ahead of
+                        // onBeforeDownload and canceled/terminated before it ever got a
+                        // chance to run, intermittently failing this test's own
+                        // "onBeforeDownload was never invoked" assertion. Ignore any
+                        // update that arrives before our own onBeforeDownload has
+                        // recorded its decision.
+                        if (gotCanceled[0] || !gotBeforeDownload[0] || !downloadItem.isValid()) {
+                            return;
+                        }
 
                         if (downloadItem.isCanceled()) {
                             gotCanceled[0] = true;
