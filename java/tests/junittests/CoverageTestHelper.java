@@ -9,7 +9,7 @@ import java.lang.reflect.Method;
 // Test/CI infrastructure only -- not part of the public API. See
 // native/CoverageTestHelper.cpp and java-cef#4 / plan/findings.md.
 class CoverageTestHelper {
-    // Flushes both native (gcov/LLVM) and Java (JaCoCo) coverage data before the
+    // Flushes both native (LLVM) and Java (JaCoCo) coverage data before the
     // known-crashing native shutdown call in TestSetupExtension.close(). A no-op
     // on any build that isn't instrumented for the corresponding kind of coverage.
     static void flush() {
@@ -17,12 +17,12 @@ class CoverageTestHelper {
         flushJacoco();
     }
 
-    // Flushes gcov/LLVM coverage data, if this was built with -DENABLE_COVERAGE=ON or
-    // -DENABLE_LLVM_COVERAGE=ON (the native method only exists in that build
-    // configuration -- see native/CMakeLists.txt). A no-op, not an error, on any
-    // other build: libjcef.so is already loaded by this point (via org.cef.CefApp),
-    // so an UnsatisfiedLinkError here means coverage instrumentation wasn't compiled
-    // in, not that anything is wrong.
+    // Flushes LLVM coverage data, if this was built with -DENABLE_LLVM_COVERAGE=ON
+    // (the native method only exists in that build configuration -- see
+    // native/CMakeLists.txt). A no-op, not an error, on any other build: libjcef.so
+    // is already loaded by this point (via org.cef.CefApp), so an
+    // UnsatisfiedLinkError here means coverage instrumentation wasn't compiled in,
+    // not that anything is wrong.
     private static void flushNative() {
         try {
             N_FlushCoverage();

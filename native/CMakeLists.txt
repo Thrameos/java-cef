@@ -172,13 +172,13 @@ set(JCEF_SRCS_WINDOWS
   temp_window_win.h
   util_win.cpp
   )
-# Coverage-only test helper (see java-cef#4 / plan/findings.md): forces gcov to
-# flush its data before the known Debug-build shutdown crash, so CI can still
-# collect real coverage numbers for everything that ran before that point. Not
-# part of normal builds at all -- only added to the target when ENABLE_COVERAGE is
-# on, so it can't affect non-coverage builds (no dead code path, no link-time
-# dependency on __gcov_dump when the target isn't compiled with --coverage).
-if(ENABLE_COVERAGE OR ENABLE_LLVM_COVERAGE)
+# Coverage-only test helper (see java-cef#4 / plan/findings.md): forces the LLVM
+# profile writer to flush its data before the known Debug-build shutdown crash,
+# so CI can still collect real coverage numbers for everything that ran before
+# that point. Not part of normal builds at all -- only added to the target when
+# ENABLE_LLVM_COVERAGE is on, so it can't affect non-coverage builds (no dead
+# code path, no link-time dependency on __llvm_profile_write_file otherwise).
+if(ENABLE_LLVM_COVERAGE)
   list(APPEND JCEF_SRCS CoverageTestHelper.cpp)
 endif()
 
@@ -468,13 +468,7 @@ endif()
 # Applied once here (rather than in each platform-specific block above) since
 # ${JCEF_TARGET} is defined by now regardless of which OS branch ran. Only
 # instruments this repo's own native/*.cpp -- not the vendored libcef_dll_wrapper.
-# GCC/Clang (gcov) only; not supported on Windows (would need a different tool, e.g.
-# OpenCppCoverage).
-if(ENABLE_COVERAGE AND NOT OS_WINDOWS)
-  target_compile_options(${JCEF_TARGET} PRIVATE --coverage -O0)
-  target_link_options(${JCEF_TARGET} PRIVATE --coverage)
-endif()
-
+# Not supported on Windows (would need a different tool, e.g. OpenCppCoverage).
 # See CMakeLists.txt's ENABLE_LLVM_COVERAGE option.
 if(ENABLE_LLVM_COVERAGE AND NOT OS_WINDOWS)
   target_compile_options(${JCEF_TARGET} PRIVATE -fprofile-instr-generate -fcoverage-mapping -O0 -g)

@@ -119,37 +119,27 @@ set(CMAKE_CONFIGURATION_TYPES Debug Release)
 # Project name.
 project(jcef)
 
-# Enable gcov/gcovr coverage instrumentation for the jcef target (native/*.cpp only,
-# not the vendored libcef_dll_wrapper). Linux/GCC-Clang only for now -- MSVC needs a
-# different toolchain (e.g. OpenCppCoverage) not wired up here.
-option(ENABLE_COVERAGE "Enable compilation for coverage measurement" OFF)
-if(ENABLE_COVERAGE AND NOT CMAKE_SYSTEM_NAME STREQUAL "Windows")
-  if(NOT CMAKE_BUILD_TYPE STREQUAL "Debug")
-    message(WARNING "ENABLE_COVERAGE set -- forcing Debug build for coverage correctness")
-    set(CMAKE_BUILD_TYPE "Debug" CACHE STRING "" FORCE)
-  endif()
-endif()
-
 # Clang source-based coverage (-fprofile-instr-generate/-fcoverage-mapping) for the
-# jcef target, as an alternative to ENABLE_COVERAGE's gcov instrumentation. gcov's
-# .gcda writer is not multi-process-safe -- CEF's zygote-style fork() (child processes
-# that briefly share the parent's already-loaded, already-instrumented libjcef.so
-# before specializing) let a child's own atexit-triggered gcov dump silently overwrite
-# the parent's real counters with near-zero data (see plan/findings.md's 2026-08-30
-# "coverage partial writer" investigation for the live repro/evidence). Clang's
-# source-based coverage avoids this by design: each process gets its own raw profile
-# file (LLVM_PROFILE_FILE's %p pattern embeds the PID), merged afterward with
-# llvm-profdata -- the same fix Chromium itself uses for its own coverage builds,
-# per docs/code_coverage.md. Requires clang/clang++ (CMAKE_C_COMPILER/CMAKE_CXX_COMPILER)
-# instead of gcc -- gcov's --coverage flags and this are mutually exclusive instrumentation
-# schemes, so this is a separate option, not layered on top of ENABLE_COVERAGE.
+# jcef target (native/*.cpp only, not the vendored libcef_dll_wrapper). Linux/
+# GCC-Clang only for now -- MSVC needs a different toolchain (e.g. OpenCppCoverage)
+# not wired up here. gcov-style instrumentation was considered and rejected: its
+# .gcda writer is not multi-process-safe -- CEF's zygote-style fork() (child
+# processes that briefly share the parent's already-loaded, already-instrumented
+# libjcef.so before specializing) let a child's own atexit-triggered gcov dump
+# silently overwrite the parent's real counters with near-zero data (see
+# plan/findings.md's 2026-08-30 "coverage partial writer" investigation for the
+# live repro/evidence). Clang's source-based coverage avoids this by design: each
+# process gets its own raw profile file (LLVM_PROFILE_FILE's %p pattern embeds the
+# PID), merged afterward with llvm-profdata -- the same fix Chromium itself uses
+# for its own coverage builds, per docs/code_coverage.md. Requires clang/clang++
+# (CMAKE_C_COMPILER/CMAKE_CXX_COMPILER) instead of gcc.
 # NOTE: needs clang-18 or newer. clang-14 and clang-15 (checked directly, 2026-08-30) both
 # fail to parse this CEF version's own base/internal/cef_bind_internal.h -- a real C++20
 # parser limitation in those versions (a `template`-disambiguated dependent alias-template
 # member access construct GCC accepts fine), fixed by clang-18. If your distro's newest
 # packaged clang is too old, fetch a clang-18+ release directly from
 # https://github.com/llvm/llvm-project/releases (self-contained tarball, no root needed).
-option(ENABLE_LLVM_COVERAGE "Enable Clang source-based coverage instrumentation for the jcef target (fork-safe alternative to ENABLE_COVERAGE's gcov)" OFF)
+option(ENABLE_LLVM_COVERAGE "Enable Clang source-based coverage instrumentation for the jcef target" OFF)
 if(ENABLE_LLVM_COVERAGE AND NOT CMAKE_SYSTEM_NAME STREQUAL "Windows")
   if(NOT CMAKE_BUILD_TYPE STREQUAL "Debug")
     message(WARNING "ENABLE_LLVM_COVERAGE set -- forcing Debug build for coverage correctness")

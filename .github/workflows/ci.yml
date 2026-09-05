@@ -103,7 +103,7 @@ jobs:
         run: |
           mkdir -p jcef_build
           cd jcef_build
-          cmake -G "Ninja" -DCMAKE_BUILD_TYPE=Release -DENABLE_COVERAGE=false ..
+          cmake -G "Ninja" -DCMAKE_BUILD_TYPE=Release ..
           ninja jcef
 
       - name: Compile Java
@@ -185,8 +185,8 @@ jobs:
       # CMakeLists.txt) and Java coverage via a JaCoCo agent around the same JUnit
       # run used by the test job. Both reports uploaded to Codecov in one step.
       #
-      # NOT gcov/gcovr/ENABLE_COVERAGE: gcov's .gcda writer is not fork-safe against
-      # CEF's zygote-style process model (a forked child that exits via atexit
+      # NOT gcov/gcovr: gcov's .gcda writer is not fork-safe against CEF's
+      # zygote-style process model (a forked child that exits via atexit
       # instead of _exit() clobbers the parent's real counters with a near-empty
       # snapshot) -- confirmed directly on this project (see
       # plan/workflows/coverage.md and the coverage_zygote_fork_gcov_bug memory):
