@@ -18,7 +18,14 @@ else
       exit 1
     fi
 
-    CLS_PATH="${DIR}/third_party/jogamp/jar/*:$OUT_PATH"
+    # Note: a trailing "/*" is only expanded into a jar list by the real `java`
+    # launcher's own -cp/-classpath handling, which we can't use together with
+    # -jar below. The JUnit console launcher's own -cp option does not expand
+    # it, so the jogamp jars must be listed explicitly here.
+    CLS_PATH="$OUT_PATH"
+    for jar in "${DIR}"/third_party/jogamp/jar/*.jar; do
+      CLS_PATH="${jar}:${CLS_PATH}"
+    done
 
     # Necessary for jcef_helper to find libcef.so.
     if [ -n "$LD_LIBRARY_PATH" ]; then
@@ -32,7 +39,7 @@ else
     shift
     shift
 
-    LD_PRELOAD=libcef.so java -Djava.library.path="$LIB_PATH" -jar "${DIR}"/third_party/junit/junit-platform-console-standalone-*.jar -cp "$OUT_PATH" --select-package tests.junittests "$@"
+    LD_PRELOAD=libcef.so java -Djava.library.path="$LIB_PATH" -jar "${DIR}"/third_party/junit/junit-platform-console-standalone-*.jar -cp "$CLS_PATH" --select-package tests.junittests "$@"
   fi
 fi
 

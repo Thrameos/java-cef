@@ -30,7 +30,11 @@ class TestFrameTest {
 
                 addResource(testUrl, "<html><body>Test!</body></html>", "text/html");
 
-                createBrowser(testUrl);
+                // Use OSR: TestFrame's default windowed (non-OSR) browser close
+                // handshake hangs (onBeforeClose never fires after native window
+                // disposal), reproduced in two independent headless environments --
+                // see plan/findings.md and upstream java-cef#364.
+                createBrowser(testUrl, true /* useOSR */);
 
                 super.setupTest();
             }

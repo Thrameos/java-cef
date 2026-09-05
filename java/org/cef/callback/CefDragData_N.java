@@ -2,10 +2,13 @@ package org.cef.callback;
 
 import java.io.OutputStream;
 import java.util.Vector;
+import java.util.concurrent.locks.Lock;
+import java.util.concurrent.locks.ReentrantLock;
 
 class CefDragData_N extends CefDragData implements CefNative {
     // Used internally to store a pointer to the CEF object.
-    private long N_CefHandle = 0;
+    private volatile long N_CefHandle = 0;
+    private final Lock lock_ = new ReentrantLock();
 
     @Override
     public void setNativeRef(String identifer, long nativeRef) {
@@ -15,6 +18,17 @@ class CefDragData_N extends CefDragData implements CefNative {
     @Override
     public long getNativeRef(String identifer) {
         return N_CefHandle;
+    }
+
+    // See CefNativeAdapter's lockAndGetNativeRef()/unlock() for the full
+    // rationale -- Thrameos/java-cef#22.
+    long lockAndGetNativeRef(String identifer) {
+        lock_.lock();
+        return N_CefHandle;
+    }
+
+    void unlock(String identifer) {
+        lock_.unlock();
     }
 
     CefDragData_N() {
