@@ -39,7 +39,35 @@ else
     shift
     shift
 
-    LD_PRELOAD=libcef.so java -Djava.library.path="$LIB_PATH" -jar "${DIR}"/third_party/junit/junit-platform-console-standalone-*.jar -cp "$CLS_PATH" --select-package tests.junittests "$@"
+    # Default to the whole tests.junittests package, but only if the caller
+    # didn't pass their own JUnit console launcher selector (--select-class,
+    # --select-package, etc). JUnit ORs multiple selectors together rather
+    # than intersecting them, so appending our default alongside a caller's
+    # --select-class silently widens the run back out to the whole package --
+    # a "run just this one class" invocation was actually running the whole
+    # suite. See commit 7678597 on coverage/phase1-value-objects-phase2-handlers.
+    SELECT_ARGS=(--select-package tests.junittests)
+    for arg in "$@"; do
+      case "$arg" in
+        --select-*|-s)
+          SELECT_ARGS=()
+          break
+          ;;
+      esac
+    done
+
+    # leak-sweep/process-isolated tests spawn a pool of isolated CEF
+    # subprocesses (each its own browser+renderer+GPU+zygote process tree),
+    # fanning out to dozens of real processes/windows. That must never be
+    # something this general-purpose script can trigger as a side effect of
+    # an otherwise-unrelated invocation (e.g. one scoped to a single
+    # --select-class for a quick local repro) -- it's a real resource-
+    # exhaustion risk, not just noise. Always excluded here, unconditionally
+    # (no flag on this script re-enables it); run leak-sweep coverage only
+    # via the dedicated tools/run_leak_sweep_isolated.sh.
+    TAG_ARGS=(--exclude-tag leak-sweep --exclude-tag process-isolated)
+
+    LD_PRELOAD=libcef.so java -Djava.library.path="$LIB_PATH" -jar "${DIR}"/third_party/junit/junit-platform-console-standalone-*.jar -cp "$CLS_PATH" "${SELECT_ARGS[@]}" "${TAG_ARGS[@]}" "$@"
   fi
 fi
 
