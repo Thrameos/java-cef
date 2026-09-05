@@ -252,12 +252,15 @@ jobs:
       - name: Compile Java
         run: tools/compile.sh linux64
 
+      # 0.8.12 cannot parse JDK 25 class files ("Unsupported class file major
+      # version 69"); 0.8.13+ added experimental Java 25 support. Pin to
+      # 0.8.15 (latest as of this writing) rather than 0.8.12.
       - name: Fetch JaCoCo
         run: |
           curl -sSL -o jacocoagent.jar \
-            https://repo1.maven.org/maven2/org/jacoco/org.jacoco.agent/0.8.12/org.jacoco.agent-0.8.12-runtime.jar
+            https://repo1.maven.org/maven2/org/jacoco/org.jacoco.agent/0.8.15/org.jacoco.agent-0.8.15-runtime.jar
           curl -sSL -o jacococli.jar \
-            https://repo1.maven.org/maven2/org/jacoco/org.jacoco.cli/0.8.12/org.jacoco.cli-0.8.12-nodeps.jar
+            https://repo1.maven.org/maven2/org/jacoco/org.jacoco.cli/0.8.15/org.jacoco.cli-0.8.15-nodeps.jar
 
       - name: Start Xvfb + window manager
         run: |
