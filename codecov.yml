@@ -1,0 +1,16 @@
+coverage:
+  status:
+    project:
+      default:
+        # Codecov's platform default is effectively "any decrease fails",
+        # which flags noise-level drift (e.g. a single new defensive guard
+        # with no new coverage-hitting test) as a failing check -- seen on
+        # PR #42 (-small%) and PR #44/#45 (-0.01%), neither a real
+        # regression. Tolerate small drift; anything bigger than this still
+        # fails and should be looked at.
+        target: auto
+        threshold: 1%
+    patch:
+      default:
+        target: auto
+        threshold: 1%
