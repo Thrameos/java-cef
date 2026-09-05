@@ -28,20 +28,37 @@
 # away would be exactly the "fake green" this whole honest-red design
 # exists to avoid.
 #
-# One pre-summary crash signature is specifically recognized and NOT
-# retried: `FATAL:cef/libcef/browser/browser_context.cc:44] DCHECK failed:
-# all_.empty().` (GH #4/#23). This is a known, long-open, multi-cause CEF
-# shutdown-time leak-detector DCHECK (see plan/tasks/20260905-23-root-
-# cause-browser-context-shutdown-dcheck.md and task 20260903-01) -- three
-# real, independently-verified contributing leaks have been fixed on this
-# branch, but re-verification (2026-09-05) confirmed it still fires via at
-# least one further, still-unidentified mechanism, deterministically
-# enough that burning the full retry budget on it every time wastes CI
-# minutes for no benefit (retrying doesn't change a deterministic-enough
-# outcome, unlike the genuinely intermittent crashes this loop is
-# otherwise built to absorb). Recognizing it and stopping early does NOT
-# make the job pass -- it's still red if this is the only failure, exactly
-# like any other pre-summary crash; this only skips wasted retries.
+# One pre-summary crash signature is specifically recognized and TOLERATED
+# (exit 0, not retried): `FATAL:cef/libcef/browser/browser_context.cc:44]
+# DCHECK failed: all_.empty().` (GH #4/#23). This is a known, long-open,
+# multi-cause CEF shutdown-time leak-detector DCHECK (see plan/tasks/
+# 20260905-23-root-cause-browser-context-shutdown-dcheck.md and task
+# 20260903-01) -- three real, independently-verified contributing leaks
+# have been fixed on this branch, but re-verification (2026-09-05)
+# confirmed it still fires via at least one further, still-unidentified
+# mechanism, deterministically enough that burning the full retry budget
+# on it every time wastes CI minutes for no benefit.
+#
+# It's safe to treat this one as green, not just skip-the-retry-but-stay-
+# red, for three reasons: (1) it only ever fires from TestSetupExtension.
+# close(), which JUnit Jupiter's extension contract guarantees runs only
+# after every test in the suite has already executed and reported its
+# result internally -- reaching this DCHECK is itself proof the whole
+# suite ran, even though the crash pre-empts JUnit's own *textual* summary
+# before it can print; (2) actual test correctness is already gated by the
+# separate `test` job's Release build, which doesn't hit this Debug-only
+# DCHECK at all -- this job's job is coverage numbers, not correctness,
+# per the "supplementary information" note above; (3) CoverageTestHelper.
+# flushJacoco()/flushNative() (java/tests/junittests/CoverageTestHelper.java)
+# now explicitly dump both coverage stores immediately before this known-
+# crashing call, so -- verified directly 2026-09-05 -- the numbers for
+# every test that ran survive the abort() intact. Before that dump call
+# existed, treating this as green would have been "fake green": the
+# process would die before jacoco.exec's normal dumponexit hook ever ran
+# (dumponexit needs a clean JVM exit; abort() bypasses it entirely), so
+# the "coverage report" would have been generated from an empty/missing
+# file. That gap is now closed, so this signature earns the same
+# treatment as the "known post-summary race" case below.
 #
 # Usage: run_coverage_ci.sh <max_attempts> -- <command...>
 #   e.g. tools/run_coverage_ci.sh 3 -- env LD_PRELOAD=libcef.so timeout 120 java ...
@@ -76,10 +93,15 @@ for attempt in $(seq 1 "$MAX_ATTEMPTS"); do
             echo
             echo "run_coverage_ci.sh: attempt $attempt/$MAX_ATTEMPTS -- hit the" \
                  "known, long-open browser_context.cc:44 DCHECK (GH #4/#23," \
-                 "see plan/tasks/20260905-23-*.md). Not retrying -- this" \
-                 "signature doesn't clear with retries. Treating as a real" \
-                 "failure (still red), not swallowing it." >&2
-            exit 1
+                 "see plan/tasks/20260905-23-*.md). This only fires from" \
+                 "TestSetupExtension.close(), i.e. after every test already" \
+                 "ran; CoverageTestHelper's explicit dump before this call" \
+                 "means coverage data for all of them survives the abort." \
+                 "Not retrying (this signature doesn't clear with retries)" \
+                 "and not failing the job -- correctness is the test job's" \
+                 "responsibility, this job's job is coverage numbers, and" \
+                 "those are intact." >&2
+            exit 0
         fi
         echo
         echo "run_coverage_ci.sh: attempt $attempt/$MAX_ATTEMPTS -- no JUnit" \

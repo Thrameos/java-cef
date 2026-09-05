@@ -292,7 +292,12 @@ jobs:
           OUT_PATH="$(pwd)/out/linux64"
           export LD_LIBRARY_PATH="$LIB_PATH"
 
-          CLS_PATH="$OUT_PATH"
+          # jacocoagent.jar on the classpath (not just -javaagent below) lets
+          # CoverageTestHelper.flushJacoco() reach org.jacoco.agent.rt.RT via
+          # reflection to force an explicit dump before the known browser_
+          # context.cc:44 DCHECK abort()s the process -- see that method's
+          # comment for why dumponexit alone isn't enough.
+          CLS_PATH="$(pwd)/jacocoagent.jar:$OUT_PATH"
           for jar in third_party/jogamp/jar/*.jar; do
             CLS_PATH="$(pwd)/${jar}:${CLS_PATH}"
           done
