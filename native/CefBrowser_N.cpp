@@ -2021,11 +2021,17 @@ Java_org_cef_browser_CefBrowser_1N_N_1SendMouseWheelEvent(
     CallJNIMethodI_V(env, cls, mouse_wheel_event, "getUnitsToScroll", &delta);
   }
 
+  // AWT's MouseWheelEvent convention is positive rotation/units == scroll
+  // content down/right, but CefMouseEvent's deltaX/deltaY (matching the
+  // native "wheel delta") is the opposite: positive == scroll content
+  // up/left. Negate so a given physical wheel gesture scrolls the same
+  // direction it would in a native browser window. See
+  // Thrameos/java-cef#14 (matches upstream cefclient issue #26).
   double deltaX = 0, deltaY = 0;
   if (cef_event.modifiers & EVENTFLAG_SHIFT_DOWN)
-    deltaX = delta;
+    deltaX = -delta;
   else
-    deltaY = delta;
+    deltaY = -delta;
 
   browser->GetHost()->SendMouseWheelEvent(cef_event, deltaX, deltaY);
 }
