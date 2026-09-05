@@ -12,7 +12,6 @@
 #include "include/cef_frame.h"
 #include "include/wrapper/cef_message_router.h"
 #include "context.h"
-#include "jcef_trace.h"
 #include "util.h"
 
 // Set the global JVM reference.
@@ -264,9 +263,6 @@ bool IsJNIEnumValue(JNIEnv* env,
 // methods, before any other work.
 #define JNI_REQUIRE_CEF_ALIVE_OR_RETURN(...)                        \
   if (!Context::GetInstance()) {                                    \
-    JCEF_TRACE("%s EXIT early -- CEF already shut down "            \
-               "(Context::GetInstance() == null)",                  \
-               __func__);                                           \
     return __VA_ARGS__;                                             \
   }
 
