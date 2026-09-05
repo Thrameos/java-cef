@@ -53,6 +53,7 @@ import java.awt.Rectangle;
 import java.beans.PropertyChangeEvent;
 import java.beans.PropertyChangeListener;
 import java.nio.ByteBuffer;
+import java.util.ArrayList;
 import java.util.Collection;
 import java.util.HashMap;
 import java.util.Vector;
@@ -82,6 +83,16 @@ public class CefClient extends CefClientHandler
     private CefPrintHandler printHandler_ = null;
     private CefRequestHandler requestHandler_ = null;
     private boolean isDisposed_ = false;
+    // Guards cleanupBrowser()'s handler-removal + super.dispose() block
+    // against running more than once. isDisposed_ alone doesn't work as
+    // that guard -- it's set true and never reset, so cleanupBrowser()
+    // being invoked again afterward (e.g. a second/late onBeforeClose()
+    // callback while browser_ is already empty) would re-enter and re-run
+    // the whole block, double-removing every handler -- see
+    // Thrameos/java-cef#22 (SetCefForJNIObjectHelper::Release SIGSEGV,
+    // confirmed live: the exact same CefFocusHandler native pointer
+    // released twice, ~83ms apart, with no intervening AddRef).
+    private boolean handlersRemoved_ = false;
     private volatile CefBrowser focusedBrowser_ = null;
     private final PropertyChangeListener propertyChangeListener = new PropertyChangeListener() {
         @Override
@@ -603,15 +614,23 @@ public class CefClient extends CefClientHandler
                 // Remove the specific browser that closed.
                 browser_.remove(identifier);
             } else if (!browser_.isEmpty()) {
-                // Close all browsers.
-                Collection<CefBrowser> browserList = browser_.values();
+                // Close all browsers. Snapshot before iterating:
+                // browser.close(true) synchronously triggers
+                // onBeforeClose() -> cleanupBrowser(identifier) ->
+                // browser_.remove(identifier), which would otherwise
+                // mutate browser_.values() while this loop is still
+                // iterating it (ConcurrentModificationException,
+                // timing-dependent on when CEF's callback fires relative
+                // to the loop).
+                Collection<CefBrowser> browserList = new ArrayList<>(browser_.values());
                 for (CefBrowser browser : browserList) {
                     browser.close(true);
                 }
                 return;
             }
 
-            if (browser_.isEmpty() && isDisposed_) {
+            if (browser_.isEmpty() && isDisposed_ && !handlersRemoved_) {
+                handlersRemoved_ = true;
                 KeyboardFocusManager.getCurrentKeyboardFocusManager().removePropertyChangeListener(
                         propertyChangeListener);
                 removeContextMenuHandler(this);
