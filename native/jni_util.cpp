@@ -131,19 +131,37 @@ void SetJNIStringRef(JNIEnv* env,
                        NewJNIString(env, stringValue));
 }
 
-jstring NewJNIString(JNIEnv* env, const std::string& str) {
-  return env->NewStringUTF(str.c_str());
+// NewStringUTF()/GetStringUTFChars() use JNI's "modified UTF-8" encoding, which is
+// not the same as standard UTF-8: supplementary-plane characters (e.g. emoji) are
+// encoded as a pair of 3-byte CESU-8 surrogate sequences instead of one 4-byte UTF-8
+// sequence, and NUL is encoded as an overlong 2-byte sequence. CefString is UTF-8/
+// UTF-16 (standards-compliant), so treating one encoding as the other silently
+// corrupts any string containing a supplementary-plane character or an embedded NUL.
+// Go through UTF-16 (NewString()/GetStringChars()) instead, which both CefString and
+// java.lang.String represent exactly, with no encoding ambiguity.
+static_assert(sizeof(jchar) == sizeof(char16_t),
+              "jchar and char16_t must be the same width to reinterpret between them");
+
+jstring NewJNIString(JNIEnv* env, const CefString& str) {
+  if (str.empty())
+    return env->NewString(nullptr, 0);
+  return env->NewString(reinterpret_cast<const jchar*>(str.c_str()),
+                        static_cast<jsize>(str.length()));
 }
 
 CefString GetJNIString(JNIEnv* env, jstring jstr) {
+  if (!jstr)
+    return CefString();
+
+  const jsize len = env->GetStringLength(jstr);
+  const jchar* chars = env->GetStringChars(jstr, nullptr);
+  if (!chars)
+    return CefString();
+
   CefString cef_str;
-  const char* chr = nullptr;
-  if (jstr)
-    chr = env->GetStringUTFChars(jstr, nullptr);
-  if (chr)
-    cef_str = chr;
-  if (jstr)
-    env->ReleaseStringUTFChars(jstr, chr);
+  cef_str.FromString16(reinterpret_cast<const char16_t*>(chars),
+                       static_cast<size_t>(len));
+  env->ReleaseStringChars(jstr, chars);
   return cef_str;
 }
 
