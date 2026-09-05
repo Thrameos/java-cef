@@ -14,7 +14,7 @@ CefRefPtr<CefResourceReadCallback> GetSelf(jlong self) {
 
 void ClearSelf(JNIEnv* env, jobject obj) {
   // Clear the reference added in ResourceHandler.
-  SetCefForJNIObject<CefResourceReadCallback>(env, obj, nullptr,
+  SetCefForJNIObject_sync<CefResourceReadCallback>(env, obj, nullptr,
                                               "CefResourceReadCallback");
 }
 

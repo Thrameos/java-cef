@@ -36,6 +36,7 @@ set(JCEF_SRCS
   CefFileDialogCallback_N.h
   CefFrame_N.cpp
   CefFrame_N.h
+  CefTestHelper.cpp
   CefJSDialogCallback_N.h
   CefJSDialogCallback_N.cpp
   CefMenuModel_N.cpp
@@ -171,6 +172,16 @@ set(JCEF_SRCS_WINDOWS
   temp_window_win.h
   util_win.cpp
   )
+# Coverage-only test helper (see java-cef#4 / plan/findings.md): forces the LLVM
+# profile writer to flush its data before the known Debug-build shutdown crash,
+# so CI can still collect real coverage numbers for everything that ran before
+# that point. Not part of normal builds at all -- only added to the target when
+# ENABLE_LLVM_COVERAGE is on, so it can't affect non-coverage builds (no dead
+# code path, no link-time dependency on __llvm_profile_write_file otherwise).
+if(ENABLE_LLVM_COVERAGE)
+  list(APPEND JCEF_SRCS CoverageTestHelper.cpp)
+endif()
+
 APPEND_PLATFORM_SOURCES(JCEF_SRCS)
 source_group(jcef FILES ${JCEF_SRCS})
 
@@ -231,6 +242,27 @@ if(OS_LINUX)
   # Set rpath so that libraries can be placed next to the executable.
   set_target_properties(${JCEF_HELPER_TARGET} PROPERTIES INSTALL_RPATH "$ORIGIN")
   set_target_properties(${JCEF_HELPER_TARGET} PROPERTIES BUILD_WITH_INSTALL_RPATH TRUE)
+
+  # Standalone diagnostics, not part of the JCEF product -- live under
+  # tools_native/ (not native/) so they're never mistaken for shipped
+  # source; see tools_native/leak_probe/leak_probe.cc's own comment and
+  # plan/LeakCheckerPort.md's 2026-08-30 status. Gated behind
+  # ENABLE_LEAK_CHECKER (see CMakeLists.txt) so a routine build doesn't pay
+  # for tooling most consumers will never run. The two-argument
+  # add_subdirectory() form points at an out-of-tree source directory while
+  # still nesting build output under this directory's own binary dir,
+  # inheriting CEF_TARGET_OUT_DIR/libcef_lib/libcef_dll_wrapper from this
+  # scope.
+  if(ENABLE_LEAK_CHECKER)
+    add_subdirectory(${CMAKE_SOURCE_DIR}/tools_native/leak_probe
+                      ${CMAKE_CURRENT_BINARY_DIR}/leak_probe)
+
+    # Same reasoning as leak_probe above -- see
+    # tools_native/jni_noop_probe/JniNoOpProbe.cpp's own comment. Its own
+    # separate .so, never linked into libjcef.so.
+    add_subdirectory(${CMAKE_SOURCE_DIR}/tools_native/jni_noop_probe
+                      ${CMAKE_CURRENT_BINARY_DIR}/jni_noop_probe)
+  endif()
 
   # JCEF library target.
   add_library(${JCEF_TARGET} SHARED ${JCEF_SRCS})
@@ -428,3 +460,18 @@ if(OS_WINDOWS)
   COPY_FILES("${JCEF_TARGET}" "${CEF_RESOURCE_FILES}" "${CEF_RESOURCE_DIR}" "${CEF_TARGET_OUT_DIR}")
 endif()
 
+
+#
+# Coverage configuration.
+#
+
+# Applied once here (rather than in each platform-specific block above) since
+# ${JCEF_TARGET} is defined by now regardless of which OS branch ran. Only
+# instruments this repo's own native/*.cpp -- not the vendored libcef_dll_wrapper.
+# Not supported on Windows (would need a different tool, e.g. OpenCppCoverage).
+# See CMakeLists.txt's ENABLE_LLVM_COVERAGE option.
+if(ENABLE_LLVM_COVERAGE AND NOT OS_WINDOWS)
+  target_compile_options(${JCEF_TARGET} PRIVATE -fprofile-instr-generate -fcoverage-mapping -O0 -g)
+  target_link_options(${JCEF_TARGET} PRIVATE -fprofile-instr-generate -fcoverage-mapping)
+  target_compile_definitions(${JCEF_TARGET} PRIVATE JCEF_LLVM_COVERAGE)
+endif()

@@ -15,7 +15,7 @@ CefRefPtr<CefBeforeDownloadCallback> GetSelf(jlong self) {
 
 void ClearSelf(JNIEnv* env, jobject obj) {
   // Clear the reference added in DownloadHandler::OnBeforeDownload.
-  SetCefForJNIObject<CefBeforeDownloadCallback>(env, obj, nullptr,
+  SetCefForJNIObject_sync<CefBeforeDownloadCallback>(env, obj, nullptr,
                                                 "CefBeforeDownloadCallback");
 }
 
@@ -28,6 +28,9 @@ Java_org_cef_callback_CefBeforeDownloadCallback_1N_N_1Continue(
     jlong self,
     jstring jdownloadPath,
     jboolean jshowDialog) {
+  // See jni_util.h's JNI_REQUIRE_CEF_ALIVE_OR_RETURN comment -- reachable
+  // from CefBeforeDownloadCallback_N.java's finalize().
+  JNI_REQUIRE_CEF_ALIVE_OR_RETURN();
   CefRefPtr<CefBeforeDownloadCallback> callback = GetSelf(self);
   if (!callback)
     return;

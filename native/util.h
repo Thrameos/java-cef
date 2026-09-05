@@ -117,6 +117,17 @@ void SetParentSync(CefWindowHandle browserHandle,
                    CefWindowHandle parentHandle,
                    CriticalWait* waitCond,
                    base::OnceClosure callback);
+
+// Schedule a bounded, idempotency-guarded fallback that synthesizes
+// CefLifeSpanHandler::OnBeforeClose() if the real one hasn't arrived within
+// a short delay -- see this function's definition in util_linux.cpp for the
+// full rationale (originally added for the windowed/X11 close hang, and
+// confirmed 2026-09-03 to also be needed for OSR: a browser whose renderer
+// process already died -- e.g. via the chrome://crash debug URL -- does not
+// reliably fire a real OnBeforeClose() when closed afterward, hanging any
+// caller that waits on it indefinitely). Safe to call unconditionally on
+// force-close: a no-op if the real OnBeforeClose() already ran.
+void ScheduleOnBeforeCloseFallback(CefRefPtr<CefBrowser> browser);
 #endif
 
 // Set the window bounds for |browserHandle|.

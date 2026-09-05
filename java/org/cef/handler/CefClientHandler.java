@@ -10,6 +10,8 @@ import org.cef.callback.CefNative;
 
 import java.util.HashMap;
 import java.util.Vector;
+import java.util.concurrent.locks.Lock;
+import java.util.concurrent.locks.ReentrantLock;
 
 /**
  * Implement this interface to provide handler implementations.
@@ -18,6 +20,11 @@ public abstract class CefClientHandler implements CefNative {
     // Used internally to store a pointer to the CEF object.
     private HashMap<String, Long> N_CefHandle = new HashMap<String, Long>();
     private Vector<CefMessageRouter> msgRouters = new Vector<>();
+    // Shared across all identifiers (coarser-grained than per-identifier,
+    // matching the existing synchronized(N_CefHandle)-for-everything
+    // pattern below) -- guards lockAndGetNativeRef()/unlock(), see
+    // Thrameos/java-cef#22.
+    private final Lock lock_ = new ReentrantLock();
 
     @Override
     public void setNativeRef(String identifer, long nativeRef) {
@@ -32,6 +39,27 @@ public abstract class CefClientHandler implements CefNative {
             if (N_CefHandle.containsKey(identifer)) return N_CefHandle.get(identifer);
         }
         return 0;
+    }
+
+    // See CefNativeAdapter's lockAndGetNativeRef()/unlock() for the full
+    // rationale -- this is the same mechanism, adapted for a handler that
+    // stores multiple identifiers in one HashMap rather than a single
+    // field. Used by native/jni_scoped_helpers.h's
+    // SetCefForJNIObject_sync()/GetCefFromJNIObject_sync(), which
+    // CefClientHandler.cpp's handler add/remove methods call into --
+    // directly relevant to Thrameos/java-cef#22's crash
+    // (SetCefForJNIObjectHelper::Release during ordinary handler-removal
+    // teardown).
+    long lockAndGetNativeRef(String identifer) {
+        lock_.lock();
+        synchronized (N_CefHandle) {
+            if (N_CefHandle.containsKey(identifer)) return N_CefHandle.get(identifer);
+        }
+        return 0;
+    }
+
+    void unlock(String identifer) {
+        lock_.unlock();
     }
 
     public CefClientHandler() {

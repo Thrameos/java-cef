@@ -10,10 +10,15 @@ import org.cef.misc.StringRef;
 
 import java.util.HashMap;
 import java.util.Map;
+import java.util.concurrent.locks.Lock;
+import java.util.concurrent.locks.ReentrantLock;
 
 class CefRequestContext_N extends CefRequestContext implements CefNative {
-    // Used internally to store a pointer to the CEF object.
-    private long N_CefHandle = 0;
+    // Used internally to store a pointer to the CEF object. volatile + the
+    // lock below for the same reason as CefNativeAdapter.N_CefHandle -- see
+    // Thrameos/java-cef#22/#23.
+    private volatile long N_CefHandle = 0;
+    private final Lock lock_ = new ReentrantLock();
     private static CefRequestContext_N globalInstance = null;
     private CefRequestContextHandler handler = null;
 
@@ -25,6 +30,17 @@ class CefRequestContext_N extends CefRequestContext implements CefNative {
     @Override
     public long getNativeRef(String identifer) {
         return N_CefHandle;
+    }
+
+    // See CefNativeAdapter's lockAndGetNativeRef()/unlock() for the full
+    // rationale -- Thrameos/java-cef#22/#23.
+    long lockAndGetNativeRef(String identifer) {
+        lock_.lock();
+        return N_CefHandle;
+    }
+
+    void unlock(String identifer) {
+        lock_.unlock();
     }
 
     CefRequestContext_N() {
@@ -39,12 +55,56 @@ class CefRequestContext_N extends CefRequestContext implements CefNative {
             ule.printStackTrace();
         }
 
+        // N_GetGlobalContext() always creates a brand-new native wrapper with
+        // its own AddRef (see CefRequestContext_N.cpp's N_GetGlobalContext()),
+        // even though it conceptually represents the same global CEF
+        // CefRequestContext every time. This method exists to memoize that
+        // into a single long-lived Java wrapper (globalInstance) instead of
+        // leaking a fresh AddRef'd reference on every call.
+        //
+        // CORRECTION (2026-08-30, found via native/jcef_trace.h's ref/unref
+        // tracing + tools/analyze_jcef_trace.py -- see plan/findings.md):
+        // the previous version of this method only released the redundant
+        // fresh `result` when its native pointer happened to equal the
+        // already-cached globalInstance's pointer ("else if" with no final
+        // "else"). CEF does not guarantee GetGlobalContext() returns the
+        // identical wrapper pointer on every call -- confirmed directly via
+        // the trace: two sequential browsers in one process produced two
+        // DIFFERENT native pointers for what's supposed to be the same
+        // global context, so the "else if" branch's equality check silently
+        // failed and `result`'s AddRef'd reference was dropped with no
+        // release at all -- a real, deterministic leak of a
+        // CefRequestContext (and therefore its underlying CefBrowserContext)
+        // reference on every browser after the first, still outstanding at
+        // CefShutdown() time. This is a strong, well-evidenced contributing
+        // cause of Thrameos/java-cef#4/#23's `all_.empty()` DCHECK (a
+        // CefBrowserContext with an outstanding reference never getting
+        // fully torn down before shutdown), though not yet confirmed as the
+        // *complete* explanation. Fixed by always disposing the redundant
+        // fresh wrapper once a globalInstance is already cached, regardless
+        // of whether the native pointers happen to match.
         if (globalInstance == null) {
             globalInstance = result;
-        } else if (globalInstance.N_CefHandle == result.N_CefHandle) {
+        } else {
             result.N_CefRequestContext_DTOR();
         }
         return globalInstance;
+    }
+
+    // Releases the single persistent native reference this class caches in
+    // globalInstance (every CefBrowser without an explicit CefRequestContext
+    // falls back to CefRequestContext.getGlobalContext(), so this is almost
+    // always populated). Without this, that AddRef'd reference to the native
+    // global CefRequestContext/CefBrowserContext survives indefinitely (a
+    // static field, never otherwise cleared), keeping it registered in CEF's
+    // internal ImplManager past CefShutdown() -- see Thrameos/java-cef#23's
+    // "DCHECK failed: all_.empty()" during final process teardown. Must be
+    // called before CefApp.shutdown() calls N_Shutdown().
+    static final void disposeGlobalContextNative() {
+        if (globalInstance != null) {
+            globalInstance.dispose();
+            globalInstance = null;
+        }
     }
 
     static final CefRequestContext_N createNative(CefRequestContextHandler handler) {

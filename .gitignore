@@ -45,6 +45,8 @@ Thumbs.db
 # JCEF generated directories
 /binary_distrib
 /jcef_build
+/jcef_build_coverage
+/jcef_build_llvmcov
 /out
 # JCEF generated files
 /native/jcef_version.h
@@ -57,3 +59,10 @@ Thumbs.db
 # Misc working directories
 /tmp
 /tools/buildtools/win/clang-format.exe
+# plan/ is its own separate git repo living on disk here -- see plan/README.md.
+/plan
+# Coverage/crash-log cruft (gcov per-file annotations, JVM hs_err_pid*.log)
+*.log
+*.gcov
+# clang-18 toolchain, fetched on demand (see plan/workflows/coverage.md)
+/tools/toolchain/
