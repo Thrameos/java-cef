@@ -4,13 +4,15 @@
 
 package org.cef.browser;
 
+import org.cef.callback.Disposable;
+
 /**
  * Used internally by {@link CefDevToolsClient}.
  * <p>
  * Handle to observer registration, As long as this object is alive, the observer will stay
  * registered.
  */
-abstract class CefRegistration {
+abstract class CefRegistration implements Disposable {
     /**
      * Removes the native reference from an unused object.
      */

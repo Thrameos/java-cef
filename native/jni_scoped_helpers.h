@@ -7,7 +7,9 @@
 
 #include <jni.h>
 
+#include <atomic>
 #include <string>
+#include <type_traits>
 
 #include "include/cef_auth_callback.h"
 #include "include/cef_browser.h"
@@ -19,6 +21,10 @@
 #include "include/cef_resource_request_handler.h"
 #include "include/cef_response.h"
 #include "include/wrapper/cef_message_router.h"
+#include "context.h"
+#include "jcef_trace.h"
+
+#include "context.h"
 
 //
 // --------
@@ -414,6 +420,20 @@
 
 // Type specialization helpers for SetCefForJNIObject.
 struct SetCefForJNIObjectHelper {
+  // GH issue #10 derisking probe (2026-09-03): a cheap proxy for "how many
+  // CEF-backed Java wrapper objects does JCEF think are still alive" at any
+  // given moment -- incremented/decremented at this same choke point the
+  // finalizer guard above already uses. This is deliberately NOT a precise
+  // live-object count (see AddRef(CefBaseRefCounted*)/Release(...) below --
+  // both fire on every association change, not just true create/destroy),
+  // but it's a real, cheap signal for whether JCEF-visible async work looks
+  // outstanding at the moment Context::Shutdown() is about to call
+  // CefShutdown(). See the "GH #10: phased/quiescent shutdown" plan.
+  static std::atomic<int> live_object_count;
+  static inline int GetLiveObjectCount() {
+    return live_object_count.load(std::memory_order_relaxed);
+  }
+
   static inline void AddRef(CefBaseScoped* obj) {}
   static inline void Release(CefBaseScoped* obj) {}
 
@@ -422,8 +442,50 @@ struct SetCefForJNIObjectHelper {
     return obj;
   }
 
-  static inline void AddRef(CefBaseRefCounted* obj) { obj->AddRef(); }
-  static inline void Release(CefBaseRefCounted* obj) { obj->Release(); }
+  // REF-trace format (see jcef_trace.h / tools/analyze_jcef_trace.py): every
+  // ref/unref-shaped event is logged as "REF kind=<KIND> ptr=<pointer>" so a
+  // post-process script can pair NEW/ADDREF against DEL/RELEASE per pointer
+  // and flag unbalanced (leaked) or use-after-free (an event on a pointer
+  // after its refcount should already be zero) patterns mechanically, without
+  // hand-reading every trace. High-frequency (every value-object/handler
+  // dispose) -- only ever costs anything in a JCEF_ENABLE_TRACE build with
+  // JCEF_TRACE=1 set.
+  static inline void AddRef(CefBaseRefCounted* obj) {
+    JCEF_TRACE("REF kind=CEF_ADDREF ptr=%p", (void*)obj);
+    live_object_count.fetch_add(1, std::memory_order_relaxed);
+    obj->AddRef();
+  }
+  static inline void Release(CefBaseRefCounted* obj) {
+    // Verified via this trace during the issue #4/#23 investigation that
+    // Thrameos/java-cef#22's crash (SIGSEGV inside this exact function) does
+    // NOT reproduce in the minimal repro (every ADDREF/RELEASE here paired
+    // cleanly) -- that crash and the all_.empty() DCHECK are separate bugs,
+    // not the same root cause.
+    //
+    // Liveness guard against issue #10/#4/#23's family: this is the single
+    // point every simple value-object *_N.java class's finalize()/dispose()
+    // funnels through (via SetCefForJNIObject_sync -> here). Java finalizers
+    // run on the JVM's own Finalizer thread with no ordering guarantee
+    // relative to CefApp.dispose()/CefShutdown() -- confirmed via
+    // tools_native/issue10_repro's ISSUE10_REPRO_LATE_CLOSE mode that
+    // touching CEF's ref-counting machinery after CefShutdown() has already
+    // torn down its allocator/global state is a real, reproducible trigger
+    // for corruption. Once CEF is fully shut down (Context::GetInstance()
+    // null, matching the same check CefApp.cpp's N_DoMessageLoopWork
+    // already uses), skip the Release() -- this "leaks" the object, but
+    // only in a process that's already tearing itself down, which is
+    // strictly safer than touching torn-down CEF state.
+    if (!Context::GetInstance()) {
+      JCEF_TRACE(
+          "REF kind=CEF_RELEASE ptr=%p SKIPPED -- CEF already shut down",
+          (void*)obj);
+      live_object_count.fetch_sub(1, std::memory_order_relaxed);
+      return;
+    }
+    JCEF_TRACE("REF kind=CEF_RELEASE ptr=%p", (void*)obj);
+    live_object_count.fetch_sub(1, std::memory_order_relaxed);
+    obj->Release();
+  }
 
   template <class T>
   static inline T* Get(CefRefPtr<T> obj) {
@@ -447,6 +509,15 @@ template <class T>
 bool SetCefForJNIObject(JNIEnv* env, jobject obj, T* base, const char* varName);
 template <class T>
 T* GetCefFromJNIObject(JNIEnv* env, jobject obj, const char* varName);
+template <class T>
+bool SetCefForJNIObject_sync(JNIEnv* env, jobject obj, T* base, const char* varName);
+template <class T>
+CefRefPtr<T> GetCefFromJNIObject_sync(JNIEnv* env, jobject obj, const char* varName);
+template <class T, class Factory>
+CefRefPtr<T> GetOrCreateCefForJNIObject_sync(JNIEnv* env,
+                                             jobject obj,
+                                             const char* varName,
+                                             Factory factory);
 
 class ScopedJNIEnv {
  public:
@@ -516,6 +587,14 @@ class ScopedJNIBase {
 
   virtual ~ScopedJNIBase() {
     if (jhandle_ && delete_ref_) {
+      // Single choke point for every local-ref-owning scoped JNI type
+      // (ScopedJNIObjectLocal/Result, ScopedJNIObject, ScopedJNIClass,
+      // ScopedJNIString, etc. all derive from this). See the REF-trace format
+      // note on SetCefForJNIObjectHelper::Release() above -- a repeated
+      // JNI_LREF_DEL for the same ptr with no JNI object creation in between
+      // is a double-DeleteLocalRef (the exact bug class fixed in
+      // render_handler.cpp's GetJNIScreenInfo() this same session).
+      JCEF_TRACE("REF kind=JNI_LREF_DEL ptr=%p", (void*)jhandle_);
       env_->DeleteLocalRef(jhandle_);
     }
   }
@@ -526,14 +605,36 @@ class ScopedJNIBase {
   // Implicit cast works in most cases.
   operator T() const { return jhandle_; }
 
-  // Returns and disassociates from the underlying handle.
+  // Returns and disassociates from the underlying handle. The caller takes
+  // over ownership (e.g. returning it as a JNI method's own return value,
+  // relying on the JVM's automatic per-call local-ref-frame cleanup instead
+  // of an explicit DeleteLocalRef) -- trace it as a release from THIS
+  // wrapper's point of view even though the underlying ref isn't actually
+  // deleted here, so tools/analyze_jcef_trace.py's NEW/DEL pairing doesn't
+  // misreport every Release()'d ref as a leak.
   T Release() {
     T temp = jhandle_;
+    if (temp && delete_ref_) {
+      JCEF_TRACE("REF kind=JNI_LREF_DEL ptr=%p (via Release())", (void*)temp);
+    }
     jhandle_ = nullptr;
     return temp;
   }
 
  protected:
+  // Call once, right after jhandle_ is assigned a (possibly null) value, in
+  // every derived-class constructor/setter that acquires a local ref this
+  // object will own -- pairs with the JNI_LREF_DEL trace in ~ScopedJNIBase()
+  // below, letting tools/analyze_jcef_trace.py pair-match acquire/release by
+  // pointer instead of only flagging same-pointer-twice heuristically (local
+  // ref slots are legitimately reused across calls, which made that
+  // heuristic noisy -- see the analyzer's own docstring).
+  void TraceAcquired() const {
+    if (jhandle_ && delete_ref_) {
+      JCEF_TRACE("REF kind=JNI_LREF_NEW ptr=%p", (void*)jhandle_);
+    }
+  }
+
   JNIEnv* const env_;
   T jhandle_;
   bool delete_ref_;
@@ -559,6 +660,7 @@ class ScopedJNIObjectResult : public ScopedJNIBase<jobject> {
   jobject& operator=(const jobject& obj) {
     DCHECK(!jhandle_);
     jhandle_ = obj;
+    TraceAcquired();
     return jhandle_;
   }
 };
@@ -580,6 +682,7 @@ class ScopedJNIObject : public ScopedJNIBase<jobject> {
         created_handle_(false) {
     DCHECK(handle);
     jhandle_ = handle;
+    TraceAcquired();
   }
 
   // Create a new JNI object handle that attaches to an existing CEF object. A
@@ -612,8 +715,8 @@ class ScopedJNIObject : public ScopedJNIBase<jobject> {
       jhandle_ = NewJNIObject(env_, jni_class_name);
       if (jhandle_) {
         created_handle_ = true;
-        SetCefForJNIObject(env_, jhandle_, SetCefForJNIObjectHelper::Get(obj),
-                           cef_class_name);
+        TraceAcquired();
+        SetCefForJNIObjectImpl(SetCefForJNIObjectHelper::Get(obj), cef_class_name);
       }
     }
   }
@@ -621,7 +724,7 @@ class ScopedJNIObject : public ScopedJNIBase<jobject> {
   virtual ~ScopedJNIObject() {
     if (temporary_ && created_handle_) {
       // Invalidate the Java object.
-      SetCefForJNIObject<T>(env_, jhandle_, nullptr, cef_class_name_);
+      SetCefForJNIObjectImpl(nullptr, cef_class_name_);
     }
   }
 
@@ -632,12 +735,21 @@ class ScopedJNIObject : public ScopedJNIBase<jobject> {
     DCHECK(handle);
     jhandle_ = handle;
     delete_ref_ = should_delete;
+    TraceAcquired();
   }
 
-  // Invalidate the Java object on destruction.
+  // Invalidate the Java object on destruction. A no-op if this object never
+  // wrapped a real CEF object (e.g. CEF invoked the owning callback with a
+  // null frame/request/etc.) -- the destructor already gates cleanup on
+  // created_handle_, so there's nothing to invalidate in that case. See
+  // Thrameos/java-cef coverage/phase1 investigation: SchemeHandlerFactory::
+  // Create() calls jframe.SetTemporary() unconditionally, and CEF can invoke
+  // it with a null frame for frame-less requests -- this DCHECK previously
+  // fired there (visible only in Debug builds, since DCHECK is compiled out
+  // in Release).
   void SetTemporary() {
-    DCHECK(created_handle_);
-    temporary_ = true;
+    if (created_handle_)
+      temporary_ = true;
   }
 
   // Get an existing native CEF object.
@@ -645,20 +757,39 @@ class ScopedJNIObject : public ScopedJNIBase<jobject> {
     if (object_)
       return object_;
     if (jhandle_)
-      object_ = GetCefFromJNIObject<T>(env_, jhandle_, cef_class_name_);
+      object_ = GetCefFromJNIObjectImpl();
     return object_;
   }
 
   // Get an existing or create a new native CEF object.
   PtrT GetOrCreateCefObject() {
-    PtrT object = GetCefObject();
-    if (!object && jhandle_) {
-      object = new T(env_, jhandle_);
-      SetCefForJNIObject(env_, jhandle_, SetCefForJNIObjectHelper::Get(object),
-                         cef_class_name_);
+    if (object_)
+      return object_;
+    if (!jhandle_)
+      return object_;
+    if constexpr (kUseSyncAccessors) {
+      // Atomic check-and-create: the plain GetCefObject()-then-
+      // SetCefForJNIObjectImpl() sequence below runs the "is there an
+      // existing object" read and the "install a new one" write under two
+      // independent lock acquisitions, so two concurrent callers (e.g. two
+      // CEF-internal threads both fetching the same handler type for the
+      // first time) can both observe "none yet" and each install a
+      // competing native wrapper, silently discarding one of them --
+      // a genuine double-release/wasted-object race, not just a benign
+      // cache miss. Route through one lock-held critical section instead.
+      // See Thrameos/java-cef#22.
+      object_ = GetOrCreateCefForJNIObject_sync<T>(
+          env_, jhandle_, cef_class_name_,
+          [this]() -> T* { return new T(env_, jhandle_); });
+    } else {
+      PtrT object = GetCefFromJNIObjectImpl();
+      if (!object) {
+        object = new T(env_, jhandle_);
+        SetCefForJNIObjectImpl(SetCefForJNIObjectHelper::Get(object), cef_class_name_);
+      }
       object_ = object;
     }
-    return object;
+    return object_;
   }
 
  protected:
@@ -666,6 +797,33 @@ class ScopedJNIObject : public ScopedJNIBase<jobject> {
   const char* const cef_class_name_;
   bool temporary_;
   bool created_handle_;
+
+ private:
+  // PtrT is CefRefPtr<T> for every instantiation except CefSchemeRegistrar
+  // (which uses CefRawPtr<T> -- a CefBaseScoped type with no AddRef/Release,
+  // incompatible with GetCefFromJNIObject_sync()'s CefRefPtr<T> return type).
+  // Route the CefRefPtr<T> case through the lock-protected _sync accessors
+  // so this class's own create-on-first-use path can't race against a
+  // concurrent (possibly reentrant, same-thread) _sync dispose elsewhere --
+  // see Thrameos/java-cef#22: mixing locked and unlocked accessors on the
+  // same underlying native-ref field gives neither side any protection.
+  static constexpr bool kUseSyncAccessors = std::is_same<PtrT, CefRefPtr<T>>::value;
+
+  PtrT GetCefFromJNIObjectImpl() {
+    if constexpr (kUseSyncAccessors) {
+      return GetCefFromJNIObject_sync<T>(env_, jhandle_, cef_class_name_);
+    } else {
+      return GetCefFromJNIObject<T>(env_, jhandle_, cef_class_name_);
+    }
+  }
+
+  void SetCefForJNIObjectImpl(T* base, const char* varName) {
+    if constexpr (kUseSyncAccessors) {
+      SetCefForJNIObject_sync(env_, jhandle_, base, varName);
+    } else {
+      SetCefForJNIObject(env_, jhandle_, base, varName);
+    }
+  }
 };
 
 // JNI class. Finding |class_name| may fail.
@@ -716,6 +874,7 @@ class ScopedJNIStringResult : public ScopedJNIBase<jstring> {
   jstring& operator=(const jstring& str) {
     DCHECK(!jhandle_);
     jhandle_ = str;
+    TraceAcquired();
     return jhandle_;
   }
 
@@ -950,16 +1109,31 @@ bool SetCefForJNIObject(JNIEnv* env,
   jlong previousValue = 0;
   JNI_CALL_METHOD(env, obj, "getNativeRef", "(Ljava/lang/String;)J", Long,
                   previousValue, identifer.get());
-  if (previousValue != 0) {
-    // Remove a reference from the previous base object.
-    SetCefForJNIObjectHelper::Release(reinterpret_cast<T*>(previousValue));
-  }
 
+  // IMPORTANT: update the Java-side stored pointer BEFORE releasing the
+  // previous object, not after. If Release() ran first, there is a window
+  // (between Release() destroying the previous object and setNativeRef()
+  // clearing/replacing the stored pointer) where the Java side still holds
+  // and can hand out a pointer to an already-destroyed object -- a
+  // use-after-free reachable from any concurrent native callback that reads
+  // this same JNI object's native ref during that window. See
+  // Thrameos/java-cef#22 (a SIGSEGV in SetCefForJNIObjectHelper::Release
+  // dereferencing a garbage pointer during ordinary browser/client
+  // teardown, consistent with exactly this kind of stale-pointer read).
   JNI_CALL_VOID_METHOD(env, obj, "setNativeRef", "(Ljava/lang/String;J)V",
                        identifer.get(), (jlong)base);
   if (base) {
     // Add a reference to the new base object.
+    JCEF_TRACE("SetCefForJNIObject varName=%s ptr=%p ADDREF", varName,
+               (void*)base);
     SetCefForJNIObjectHelper::AddRef(base);
+  }
+  if (previousValue != 0) {
+    // Remove a reference from the previous base object, now that the
+    // Java-side pointer no longer refers to it.
+    JCEF_TRACE("SetCefForJNIObject varName=%s ptr=%p RELEASE", varName,
+               (void*)previousValue);
+    SetCefForJNIObjectHelper::Release(reinterpret_cast<T*>(previousValue));
   }
   return true;
 }
@@ -977,6 +1151,135 @@ T* GetCefFromJNIObject(JNIEnv* env, jobject obj, const char* varName) {
   if (previousValue != 0)
     return reinterpret_cast<T*>(previousValue);
   return nullptr;
+}
+
+// Locking variants of SetCefForJNIObject/GetCefFromJNIObject. The plain
+// versions above are safe for the single-writer-at-dispose-time /
+// single-reader-at-call-time pattern most call sites use, but are not
+// atomic against a concurrent reader observing the native pointer exactly
+// while it's being replaced -- see Thrameos/java-cef#22. These variants
+// call through to lockAndGetNativeRef()/unlock() (see CefNativeAdapter.java)
+// instead of getNativeRef()/setNativeRef() directly, so the read-modify
+// sequence is atomic with respect to any other thread going through the
+// same lock. Use for object types implicated in a confirmed
+// teardown-race crash rather than switching every call site over
+// speculatively -- see the call sites' own comments for which crash each
+// one addresses.
+
+// Set the CEF base object for an existing JNI object, atomically with
+// respect to concurrent GetCefFromJNIObject_sync() calls on the same
+// object.
+template <class T>
+bool SetCefForJNIObject_sync(JNIEnv* env,
+                             jobject obj,
+                             T* base,
+                             const char* varName) {
+  if (!obj)
+    return false;
+
+  ScopedJNIString identifer(env, varName);
+  jlong previousValue = 0;
+  JNI_CALL_METHOD(env, obj, "lockAndGetNativeRef", "(Ljava/lang/String;)J",
+                  Long, previousValue, identifer.get());
+
+  JNI_CALL_VOID_METHOD(env, obj, "setNativeRef", "(Ljava/lang/String;J)V",
+                       identifer.get(), (jlong)base);
+  if (base) {
+    JCEF_TRACE("SetCefForJNIObject_sync varName=%s ptr=%p ADDREF", varName,
+               (void*)base);
+    SetCefForJNIObjectHelper::AddRef(base);
+  }
+
+  // Release the lock before releasing the previous object's reference --
+  // Release() can run arbitrary CEF teardown code and must not be called
+  // while still holding this Java-side lock (risk of deadlock against
+  // anything that re-enters back into this same object).
+  JNI_CALL_VOID_METHOD(env, obj, "unlock", "(Ljava/lang/String;)V",
+                       identifer.get());
+
+  if (previousValue != 0) {
+    JCEF_TRACE("SetCefForJNIObject_sync varName=%s ptr=%p RELEASE", varName,
+               (void*)previousValue);
+    SetCefForJNIObjectHelper::Release(reinterpret_cast<T*>(previousValue));
+  }
+  return true;
+}
+
+// Retrieve the CEF base object from an existing JNI object, atomically with
+// respect to a concurrent SetCefForJNIObject_sync() call on the same
+// object -- returns a CefRefPtr (which has already taken its own reference
+// before the lock is released) rather than a raw pointer, so the caller
+// always has a safe-to-use reference even if the object is disposed
+// immediately afterward.
+template <class T>
+CefRefPtr<T> GetCefFromJNIObject_sync(JNIEnv* env, jobject obj, const char* varName) {
+  if (!obj)
+    return CefRefPtr<T>();
+
+  ScopedJNIString identifer(env, varName);
+  jlong value = 0;
+  JNI_CALL_METHOD(env, obj, "lockAndGetNativeRef", "(Ljava/lang/String;)J",
+                  Long, value, identifer.get());
+
+  // The CefRefPtr constructor calls AddRef() on the underlying object while
+  // the lock is still held, so a concurrent SetCefForJNIObject_sync() call
+  // (blocked on the same lock) cannot Release() the object until after this
+  // reference has been safely taken.
+  CefRefPtr<T> result(reinterpret_cast<T*>(value));
+
+  JNI_CALL_VOID_METHOD(env, obj, "unlock", "(Ljava/lang/String;)V",
+                       identifer.get());
+  return result;
+}
+
+// Atomically get the existing CEF object stored for |obj|'s |varName| slot,
+// or create and install a new one via |factory()| if none exists yet, all
+// under a single lock acquisition -- closes the race described at
+// ScopedJNIObject<T>::GetOrCreateCefObject()'s call site: two concurrent
+// callers can no longer both observe "no object yet" and each install a
+// competing native wrapper, since the check and the install now happen
+// atomically with respect to each other and to GetCefFromJNIObject_sync()/
+// SetCefForJNIObject_sync() on the same slot. See Thrameos/java-cef#22.
+//
+// |factory| must not itself touch this same JNI object's lock (no reentrant
+// Java call back into lockAndGetNativeRef()/unlock() for the same
+// |varName|) -- it runs while the lock is held. Constructing a native
+// wrapper (a NewGlobalRef plus plain field initialization, no Java method
+// calls) satisfies this.
+template <class T, class Factory>
+CefRefPtr<T> GetOrCreateCefForJNIObject_sync(JNIEnv* env,
+                                             jobject obj,
+                                             const char* varName,
+                                             Factory factory) {
+  if (!obj)
+    return CefRefPtr<T>();
+
+  ScopedJNIString identifer(env, varName);
+  jlong value = 0;
+  JNI_CALL_METHOD(env, obj, "lockAndGetNativeRef", "(Ljava/lang/String;)J",
+                  Long, value, identifer.get());
+
+  CefRefPtr<T> result;
+  if (value != 0) {
+    // Existing object -- AddRef happens inside the CefRefPtr constructor,
+    // while the lock is still held, so a concurrent SetCefForJNIObject_sync()
+    // replacing this slot can't Release() it out from under us.
+    result = CefRefPtr<T>(reinterpret_cast<T*>(value));
+  } else {
+    T* base = factory();
+    if (base) {
+      JNI_CALL_VOID_METHOD(env, obj, "setNativeRef", "(Ljava/lang/String;J)V",
+                           identifer.get(), (jlong)base);
+      JCEF_TRACE("GetOrCreateCefForJNIObject_sync varName=%s ptr=%p ADDREF",
+                 varName, (void*)base);
+      SetCefForJNIObjectHelper::AddRef(base);
+      result = CefRefPtr<T>(base);
+    }
+  }
+
+  JNI_CALL_VOID_METHOD(env, obj, "unlock", "(Ljava/lang/String;)V",
+                       identifer.get());
+  return result;
 }
 
 #endif  // JCEF_NATIVE_JNI_SCOPED_HELPERS_H_

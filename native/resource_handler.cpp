@@ -3,6 +3,7 @@
 // can be found in the LICENSE file.
 
 #include "resource_handler.h"
+#include "jcef_trace.h"
 
 #include "jni_util.h"
 #include "util.h"
@@ -12,6 +13,7 @@ ResourceHandler::ResourceHandler(JNIEnv* env, jobject handler)
 
 bool ResourceHandler::ProcessRequest(CefRefPtr<CefRequest> request,
                                      CefRefPtr<CefCallback> callback) {
+  JCEF_TRACE("ResourceHandler::ProcessRequest() ENTER");
   ScopedJNIEnv env;
   if (!env)
     return false;
@@ -38,6 +40,7 @@ bool ResourceHandler::ProcessRequest(CefRefPtr<CefRequest> request,
 bool ResourceHandler::Open(CefRefPtr<CefRequest> request,
                            bool& handle_request,
                            CefRefPtr<CefCallback> callback) {
+  JCEF_TRACE("ResourceHandler::Open() ENTER");
   ScopedJNIEnv env;
   if (!env)
     return false;
@@ -68,6 +71,7 @@ bool ResourceHandler::Open(CefRefPtr<CefRequest> request,
 void ResourceHandler::GetResponseHeaders(CefRefPtr<CefResponse> response,
                                          int64_t& response_length,
                                          CefString& redirectUrl) {
+  JCEF_TRACE("ResourceHandler::GetResponseHeaders() ENTER");
   ScopedJNIEnv env;
   if (!env)
     return;
@@ -91,6 +95,7 @@ bool ResourceHandler::ReadResponse(void* data_out,
                                    int bytes_to_read,
                                    int& bytes_read,
                                    CefRefPtr<CefCallback> callback) {
+  JCEF_TRACE("ResourceHandler::ReadResponse() ENTER");
   ScopedJNIEnv env;
   if (!env)
     return false;
@@ -128,6 +133,7 @@ bool ResourceHandler::Read(void* data_out,
                            int bytes_to_read,
                            int& bytes_read,
                            CefRefPtr<CefResourceReadCallback> callback) {
+  JCEF_TRACE("ResourceHandler::Read() ENTER");
   ScopedJNIEnv env;
   if (!env)
     return false;
@@ -172,6 +178,7 @@ bool ResourceHandler::Read(void* data_out,
 bool ResourceHandler::Skip(int64_t bytes_to_skip,
                            int64_t& bytes_skipped,
                            CefRefPtr<CefResourceSkipCallback> callback) {
+  JCEF_TRACE("ResourceHandler::Skip() ENTER");
   ScopedJNIEnv env;
   if (!env)
     return false;
@@ -197,6 +204,7 @@ bool ResourceHandler::Skip(int64_t bytes_to_skip,
 }
 
 void ResourceHandler::Cancel() {
+  JCEF_TRACE("ResourceHandler::Cancel() ENTER");
   ScopedJNIEnv env;
   if (!env)
     return;

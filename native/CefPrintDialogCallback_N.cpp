@@ -5,6 +5,7 @@
 #include "CefPrintDialogCallback_N.h"
 #include "include/cef_print_handler.h"
 #include "jni_scoped_helpers.h"
+#include "jni_util.h"
 
 namespace {
 
@@ -14,7 +15,7 @@ CefRefPtr<CefPrintDialogCallback> GetSelf(jlong self) {
 
 void ClearSelf(JNIEnv* env, jobject obj) {
   // Clear the reference added in PrintHandler::OnPrintDialog.
-  SetCefForJNIObject<CefPrintDialogCallback>(env, obj, nullptr,
+  SetCefForJNIObject_sync<CefPrintDialogCallback>(env, obj, nullptr,
                                              "CefPrintDialogCallback");
 }
 
@@ -30,7 +31,7 @@ Java_org_cef_callback_CefPrintDialogCallback_1N_N_1Continue(
   if (!callback)
     return;
 
-  CefRefPtr<CefPrintSettings> settings = GetCefFromJNIObject<CefPrintSettings>(
+  CefRefPtr<CefPrintSettings> settings = GetCefFromJNIObject_sync<CefPrintSettings>(
       env, jprintsettings, "CefPrintSettings");
   if (settings) {
     callback->Continue(settings);
@@ -44,6 +45,9 @@ JNIEXPORT void JNICALL
 Java_org_cef_callback_CefPrintDialogCallback_1N_N_1Cancel(JNIEnv* env,
                                                           jobject obj,
                                                           jlong self) {
+  // See jni_util.h's JNI_REQUIRE_CEF_ALIVE_OR_RETURN comment -- reachable
+  // from CefPrintDialogCallback_N.java's finalize().
+  JNI_REQUIRE_CEF_ALIVE_OR_RETURN();
   CefRefPtr<CefPrintDialogCallback> callback = GetSelf(self);
   if (!callback)
     return;

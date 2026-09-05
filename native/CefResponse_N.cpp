@@ -30,7 +30,7 @@ JNIEXPORT void JNICALL
 Java_org_cef_network_CefResponse_1N_N_1Dispose(JNIEnv* env,
                                                jobject obj,
                                                jlong self) {
-  SetCefForJNIObject<CefResponse>(env, obj, nullptr, kCefClassName);
+  SetCefForJNIObject_sync<CefResponse>(env, obj, nullptr, kCefClassName);
 }
 
 JNIEXPORT jboolean JNICALL
@@ -151,8 +151,13 @@ Java_org_cef_network_CefResponse_1N_N_1SetHeaderByName(JNIEnv* env,
   CefRefPtr<CefResponse> response = GetSelf(self);
   if (!response)
     return;
-  return response->SetHeaderByName(GetJNIString(env, jname),
-                                   GetJNIString(env, jvalue),
+  // CEF's own CHECK(!name.empty()) aborts the Debug/coverage build
+  // (silently permitted in Release) on an empty header name. See
+  // Thrameos/java-cef#19/#20/#21 and CefRequest_N.cpp's matching guard.
+  CefString name = GetJNIString(env, jname);
+  if (name.empty())
+    return;
+  return response->SetHeaderByName(name, GetJNIString(env, jvalue),
                                    joverride != JNI_FALSE);
 }
 

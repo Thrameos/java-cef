@@ -3,6 +3,7 @@
 // can be found in the LICENSE file.
 
 #include "request_handler.h"
+#include "jcef_trace.h"
 
 #include "client_handler.h"
 #include "jni_util.h"
@@ -18,6 +19,7 @@ bool RequestHandler::OnBeforeBrowse(CefRefPtr<CefBrowser> browser,
                                     CefRefPtr<CefRequest> request,
                                     bool user_gesture,
                                     bool is_redirect) {
+  JCEF_TRACE("RequestHandler::OnBeforeBrowse() ENTER");
   // Forward request to ClientHandler to make the message_router_ happy.
   CefRefPtr<ClientHandler> client =
       (ClientHandler*)browser->GetHost()->GetClient().get();
@@ -49,6 +51,7 @@ bool RequestHandler::OnOpenURLFromTab(CefRefPtr<CefBrowser> browser,
                                       const CefString& target_url,
                                       WindowOpenDisposition target_disposition,
                                       bool user_gesture) {
+  JCEF_TRACE("RequestHandler::OnOpenURLFromTab() ENTER");
   ScopedJNIEnv env;
   if (!env)
     return false;
@@ -76,6 +79,7 @@ CefRefPtr<CefResourceRequestHandler> RequestHandler::GetResourceRequestHandler(
     bool is_download,
     const CefString& request_initiator,
     bool& disable_default_handling) {
+  JCEF_TRACE("RequestHandler::GetResourceRequestHandler() ENTER");
   ScopedJNIEnv env;
   if (!env)
     return nullptr;
@@ -113,6 +117,7 @@ bool RequestHandler::GetAuthCredentials(CefRefPtr<CefBrowser> browser,
                                         const CefString& realm,
                                         const CefString& scheme,
                                         CefRefPtr<CefAuthCallback> callback) {
+  JCEF_TRACE("RequestHandler::GetAuthCredentials() ENTER");
   ScopedJNIEnv env;
   if (!env)
     return false;
@@ -148,6 +153,7 @@ bool RequestHandler::OnCertificateError(CefRefPtr<CefBrowser> browser,
                                         const CefString& request_url,
                                         CefRefPtr<CefSSLInfo> ssl_info,
                                         CefRefPtr<CefCallback> callback) {
+  JCEF_TRACE("RequestHandler::OnCertificateError() ENTER");
   ScopedJNIEnv env;
   if (!env)
     return false;
@@ -178,6 +184,7 @@ void RequestHandler::OnRenderProcessTerminated(CefRefPtr<CefBrowser> browser,
                                                TerminationStatus status,
                                                int error_code,
                                                const CefString& error_string) {
+  JCEF_TRACE("RequestHandler::OnRenderProcessTerminated() ENTER");
   // Forward request to ClientHandler to make the message_router_ happy.
   CefRefPtr<ClientHandler> client =
       (ClientHandler*)browser->GetHost()->GetClient().get();

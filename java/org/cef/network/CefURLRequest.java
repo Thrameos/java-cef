@@ -5,6 +5,7 @@
 package org.cef.network;
 
 import org.cef.callback.CefURLRequestClient;
+import org.cef.callback.Disposable;
 import org.cef.handler.CefLoadHandler.ErrorCode;
 
 /**
@@ -14,7 +15,7 @@ import org.cef.handler.CefLoadHandler.ErrorCode;
  * process. Once created the methods of the URL request object must be accessed
  * on the same thread that created it.
  */
-public abstract class CefURLRequest {
+public abstract class CefURLRequest implements Disposable {
     public static enum Status {
         UR_UNKNOWN,
         UR_SUCCESS,

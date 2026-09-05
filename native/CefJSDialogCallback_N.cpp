@@ -16,7 +16,7 @@ CefRefPtr<CefJSDialogCallback> GetSelf(jlong self) {
 void ClearSelf(JNIEnv* env, jobject obj) {
   // Clear the reference added in JSDialogHandler::OnJSDialog and
   // JSDialogHandler::OnBeforeUnloadDialog.
-  SetCefForJNIObject<CefJSDialogCallback>(env, obj, nullptr,
+  SetCefForJNIObject_sync<CefJSDialogCallback>(env, obj, nullptr,
                                           "CefJSDialogCallback");
 }
 
@@ -28,6 +28,9 @@ Java_org_cef_callback_CefJSDialogCallback_1N_N_1Continue(JNIEnv* env,
                                                          jlong self,
                                                          jboolean jsuccess,
                                                          jstring juser_input) {
+  // See jni_util.h's JNI_REQUIRE_CEF_ALIVE_OR_RETURN comment -- reachable
+  // from CefJSDialogCallback_N.java's finalize().
+  JNI_REQUIRE_CEF_ALIVE_OR_RETURN();
   CefRefPtr<CefJSDialogCallback> callback = GetSelf(self);
   if (!callback)
     return;

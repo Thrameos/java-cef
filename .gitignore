@@ -1,5 +1,8 @@
 *.gypcmd
 *.mk
+*.log
+*.gcov
+/tools/toolchain/
 *.ncb
 *.opensdf
 *.props
@@ -45,6 +48,10 @@ Thumbs.db
 # JCEF generated directories
 /binary_distrib
 /jcef_build
+/jcef_build_coverage
+/jcef_build_asan
+/jcef_build_llvmcov
+/jcef_build_trace
 /out
 # JCEF generated files
 /native/jcef_version.h
@@ -58,3 +65,11 @@ Thumbs.db
 /tmp
 /plan
 /tools/buildtools/win/clang-format.exe
+# Standalone diagnostic build artifacts (tools_native/malloc_trace -- built
+# ad hoc with a plain g++ invocation, not via CMake; see its own comment)
+/tools_native/malloc_trace/malloc_trace.so
+/tools_native/malloc_trace/selftest
+# Crash-log cruft (JVM hs_err_pid*.log)
+*.log
+# clang-18 toolchain, fetched on demand (see plan/workflows/coverage.md)
+/tools/toolchain/

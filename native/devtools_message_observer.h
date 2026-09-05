@@ -26,6 +26,8 @@ class DevToolsMessageObserver : public CefDevToolsMessageObserver {
                                const CefString& method,
                                const void* params,
                                size_t params_size) override;
+  virtual void OnDevToolsAgentAttached(CefRefPtr<CefBrowser> browser) override;
+  virtual void OnDevToolsAgentDetached(CefRefPtr<CefBrowser> browser) override;
 
  protected:
   ScopedJNIObjectGlobal handle_;

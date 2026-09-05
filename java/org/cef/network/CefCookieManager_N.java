@@ -9,10 +9,13 @@ import org.cef.callback.CefCookieVisitor;
 import org.cef.callback.CefNative;
 
 import java.util.Vector;
+import java.util.concurrent.locks.Lock;
+import java.util.concurrent.locks.ReentrantLock;
 
 class CefCookieManager_N extends CefCookieManager implements CefNative {
     // Used internally to store a pointer to the CEF object.
-    private long N_CefHandle = 0;
+    private volatile long N_CefHandle = 0;
+    private final Lock lock_ = new ReentrantLock();
     private static CefCookieManager_N globalInstance = null;
 
     @Override
@@ -23,6 +26,17 @@ class CefCookieManager_N extends CefCookieManager implements CefNative {
     @Override
     public long getNativeRef(String identifer) {
         return N_CefHandle;
+    }
+
+    // See CefNativeAdapter's lockAndGetNativeRef()/unlock() for the full
+    // rationale -- Thrameos/java-cef#22.
+    long lockAndGetNativeRef(String identifer) {
+        lock_.lock();
+        return N_CefHandle;
+    }
+
+    void unlock(String identifer) {
+        lock_.unlock();
     }
 
     CefCookieManager_N() {
@@ -44,6 +58,19 @@ class CefCookieManager_N extends CefCookieManager implements CefNative {
 
         globalInstance = result;
         return globalInstance;
+    }
+
+    // Releases the persistent native reference cached in globalInstance --
+    // see Thrameos/java-cef#23 (this follows the exact same leaked-static
+    // pattern as CefRequestContext_N.globalInstance, since the global
+    // cookie manager is tied to the global request context's underlying
+    // CefBrowserContext). Must be called before CefApp.shutdown() calls
+    // N_Shutdown().
+    static final void disposeGlobalManagerNative() {
+        if (globalInstance != null) {
+            globalInstance.dispose();
+            globalInstance = null;
+        }
     }
 
     @Override

@@ -78,11 +78,31 @@ Java_org_cef_handler_CefClientHandler_N_1removeDragHandler(JNIEnv*,
 
 /*
  * Class:     org_cef_handler_CefClientHandler
+ * Method:    N_removeFindHandler
+ * Signature: (Lorg/cef/handler/CefFindHandler;)V
+ */
+JNIEXPORT void JNICALL
+Java_org_cef_handler_CefClientHandler_N_1removeFindHandler(JNIEnv*,
+                                                           jobject,
+                                                           jobject);
+
+/*
+ * Class:     org_cef_handler_CefClientHandler
  * Method:    N_removeFocusHandler
  * Signature: (Lorg/cef/handler/CefFocusHandler;)V
  */
 JNIEXPORT void JNICALL
 Java_org_cef_handler_CefClientHandler_N_1removeFocusHandler(JNIEnv*,
+                                                            jobject,
+                                                            jobject);
+
+/*
+ * Class:     org_cef_handler_CefClientHandler
+ * Method:    N_removeFrameHandler
+ * Signature: (Lorg/cef/handler/CefFrameHandler;)V
+ */
+JNIEXPORT void JNICALL
+Java_org_cef_handler_CefClientHandler_N_1removeFrameHandler(JNIEnv*,
                                                             jobject,
                                                             jobject);
 
@@ -125,6 +145,16 @@ JNIEXPORT void JNICALL
 Java_org_cef_handler_CefClientHandler_N_1removeLoadHandler(JNIEnv*,
                                                            jobject,
                                                            jobject);
+
+/*
+ * Class:     org_cef_handler_CefClientHandler
+ * Method:    N_removePermissionHandler
+ * Signature: (Lorg/cef/handler/CefPermissionHandler;)V
+ */
+JNIEXPORT void JNICALL
+Java_org_cef_handler_CefClientHandler_N_1removePermissionHandler(JNIEnv*,
+                                                                 jobject,
+                                                                 jobject);
 
 /*
  * Class:     org_cef_handler_CefClientHandler

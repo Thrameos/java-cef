@@ -10,6 +10,8 @@ import org.cef.callback.CefNative;
 
 import java.util.HashMap;
 import java.util.Vector;
+import java.util.concurrent.locks.Lock;
+import java.util.concurrent.locks.ReentrantLock;
 
 /**
  * Implement this interface to provide handler implementations.
@@ -18,6 +20,11 @@ public abstract class CefClientHandler implements CefNative {
     // Used internally to store a pointer to the CEF object.
     private HashMap<String, Long> N_CefHandle = new HashMap<String, Long>();
     private Vector<CefMessageRouter> msgRouters = new Vector<>();
+    // Shared across all identifiers (coarser-grained than per-identifier,
+    // matching the existing synchronized(N_CefHandle)-for-everything
+    // pattern below) -- guards lockAndGetNativeRef()/unlock(), see
+    // Thrameos/java-cef#22.
+    private final Lock lock_ = new ReentrantLock();
 
     @Override
     public void setNativeRef(String identifer, long nativeRef) {
@@ -32,6 +39,27 @@ public abstract class CefClientHandler implements CefNative {
             if (N_CefHandle.containsKey(identifer)) return N_CefHandle.get(identifer);
         }
         return 0;
+    }
+
+    // See CefNativeAdapter's lockAndGetNativeRef()/unlock() for the full
+    // rationale -- this is the same mechanism, adapted for a handler that
+    // stores multiple identifiers in one HashMap rather than a single
+    // field. Used by native/jni_scoped_helpers.h's
+    // SetCefForJNIObject_sync()/GetCefFromJNIObject_sync(), which
+    // CefClientHandler.cpp's handler add/remove methods call into --
+    // directly relevant to Thrameos/java-cef#22's crash
+    // (SetCefForJNIObjectHelper::Release during ordinary handler-removal
+    // teardown).
+    long lockAndGetNativeRef(String identifer) {
+        lock_.lock();
+        synchronized (N_CefHandle) {
+            if (N_CefHandle.containsKey(identifer)) return N_CefHandle.get(identifer);
+        }
+        return 0;
+    }
+
+    void unlock(String identifer) {
+        lock_.unlock();
     }
 
     public CefClientHandler() {
@@ -103,11 +131,25 @@ public abstract class CefClientHandler implements CefNative {
     abstract protected CefDragHandler getDragHandler();
 
     /**
+     * Return the handler for find events.
+     * This method is a callback method and is called by
+     * the native code.
+     */
+    abstract protected CefFindHandler getFindHandler();
+
+    /**
      * Return the handler for focus events.
      * This method is a callback method and is called by
      * the native code.
      */
     abstract protected CefFocusHandler getFocusHandler();
+
+    /**
+     * Return the handler for frame life span events.
+     * This method is a callback method and is called by
+     * the native code.
+     */
+    abstract protected CefFrameHandler getFrameHandler();
 
     /**
      * Return the handler for javascript dialog requests.
@@ -136,6 +178,12 @@ public abstract class CefClientHandler implements CefNative {
      * the native code.
      */
     abstract protected CefLoadHandler getLoadHandler();
+
+    /**
+     * Return the handler for permission requests. If no handler is provided
+     * the default implementation will be used.
+     */
+    abstract protected CefPermissionHandler getPermissionHandler();
 
     /**
      * Return the handler for printing on Linux. If a print handler is not
@@ -215,9 +263,25 @@ public abstract class CefClientHandler implements CefNative {
         }
     }
 
+    protected void removeFindHandler(CefFindHandler h) {
+        try {
+            N_removeFindHandler(h);
+        } catch (UnsatisfiedLinkError err) {
+            err.printStackTrace();
+        }
+    }
+
     protected void removeFocusHandler(CefFocusHandler h) {
         try {
             N_removeFocusHandler(h);
+        } catch (UnsatisfiedLinkError err) {
+            err.printStackTrace();
+        }
+    }
+
+    protected void removeFrameHandler(CefFrameHandler h) {
+        try {
+            N_removeFrameHandler(h);
         } catch (UnsatisfiedLinkError err) {
             err.printStackTrace();
         }
@@ -250,6 +314,14 @@ public abstract class CefClientHandler implements CefNative {
     protected void removeLoadHandler(CefLoadHandler h) {
         try {
             N_removeLoadHandler(h);
+        } catch (UnsatisfiedLinkError err) {
+            err.printStackTrace();
+        }
+    }
+
+    protected void removePermissionHandler(CefPermissionHandler h) {
+        try {
+            N_removePermissionHandler(h);
         } catch (UnsatisfiedLinkError err) {
             err.printStackTrace();
         }
@@ -303,11 +375,14 @@ public abstract class CefClientHandler implements CefNative {
     private final native void N_removeDisplayHandler(CefDisplayHandler h);
     private final native void N_removeDownloadHandler(CefDisplayHandler h);
     private final native void N_removeDragHandler(CefDragHandler h);
+    private final native void N_removeFindHandler(CefFindHandler h);
     private final native void N_removeFocusHandler(CefFocusHandler h);
+    private final native void N_removeFrameHandler(CefFrameHandler h);
     private final native void N_removeJSDialogHandler(CefJSDialogHandler h);
     private final native void N_removeKeyboardHandler(CefKeyboardHandler h);
     private final native void N_removeLifeSpanHandler(CefLifeSpanHandler h);
     private final native void N_removeLoadHandler(CefLoadHandler h);
+    private final native void N_removePermissionHandler(CefPermissionHandler h);
     private final native void N_removePrintHandler(CefPrintHandler h);
     private final native void N_removeMessageRouter(CefMessageRouter h);
     private final native void N_removeRenderHandler(CefRenderHandler h);

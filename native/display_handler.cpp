@@ -3,6 +3,7 @@
 // can be found in the LICENSE file.
 
 #include "display_handler.h"
+#include "jcef_trace.h"
 
 #include "jni_util.h"
 
@@ -83,6 +84,7 @@ DisplayHandler::DisplayHandler(JNIEnv* env, jobject handler)
 void DisplayHandler::OnAddressChange(CefRefPtr<CefBrowser> browser,
                                      CefRefPtr<CefFrame> frame,
                                      const CefString& url) {
+  JCEF_TRACE("DisplayHandler::OnAddressChange() ENTER");
   ScopedJNIEnv env;
   if (!env)
     return;
@@ -100,6 +102,7 @@ void DisplayHandler::OnAddressChange(CefRefPtr<CefBrowser> browser,
 
 void DisplayHandler::OnTitleChange(CefRefPtr<CefBrowser> browser,
                                    const CefString& title) {
+  JCEF_TRACE("DisplayHandler::OnTitleChange() ENTER");
   ScopedJNIEnv env;
   if (!env)
     return;
@@ -114,6 +117,7 @@ void DisplayHandler::OnTitleChange(CefRefPtr<CefBrowser> browser,
 
 void DisplayHandler::OnFullscreenModeChange(CefRefPtr<CefBrowser> browser,
                                             bool fullscreen) {
+  JCEF_TRACE("DisplayHandler::OnFullscreenModeChange() ENTER");
   ScopedJNIEnv env;
   if (!env)
     return;
@@ -125,6 +129,7 @@ void DisplayHandler::OnFullscreenModeChange(CefRefPtr<CefBrowser> browser,
 }
 
 bool DisplayHandler::OnTooltip(CefRefPtr<CefBrowser> browser, CefString& text) {
+  JCEF_TRACE("DisplayHandler::OnTooltip() ENTER");
   ScopedJNIEnv env;
   if (!env)
     return false;
@@ -142,6 +147,7 @@ bool DisplayHandler::OnTooltip(CefRefPtr<CefBrowser> browser, CefString& text) {
 
 void DisplayHandler::OnStatusMessage(CefRefPtr<CefBrowser> browser,
                                      const CefString& value) {
+  JCEF_TRACE("DisplayHandler::OnStatusMessage() ENTER");
   ScopedJNIEnv env;
   if (!env)
     return;
@@ -159,6 +165,7 @@ bool DisplayHandler::OnConsoleMessage(CefRefPtr<CefBrowser> browser,
                                       const CefString& message,
                                       const CefString& source,
                                       int line) {
+  JCEF_TRACE("DisplayHandler::OnConsoleMessage() ENTER");
   ScopedJNIEnv env;
   if (!env)
     return false;
@@ -198,6 +205,7 @@ bool DisplayHandler::OnCursorChange(CefRefPtr<CefBrowser> browser,
                                     CefCursorHandle cursor,
                                     cef_cursor_type_t type,
                                     const CefCursorInfo& custom_cursor_info) {
+  JCEF_TRACE("DisplayHandler::OnCursorChange() ENTER");
   ScopedJNIEnv env;
   if (!env)
     return false;

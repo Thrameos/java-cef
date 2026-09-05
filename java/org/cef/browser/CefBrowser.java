@@ -23,7 +23,7 @@ import java.util.concurrent.CompletableFuture;
 /**
  * Interface representing a browser.
  */
-public interface CefBrowser {
+public interface CefBrowser extends AutoCloseable {
     /**
      * Call to immediately create the underlying browser object. By default the
      * browser object will be created when the parent container is displayed for
@@ -237,6 +237,22 @@ public interface CefBrowser {
      * @param force force the close.
      */
     public void close(boolean force);
+
+    /**
+     * Alias for {@code close(true)} so a browser can be used in a
+     * try-with-resources statement. Uses force=true (an immediate,
+     * unnegotiated close) rather than force=false's DoClose() JS
+     * negotiation, since try-with-resources needs cleanup that doesn't
+     * depend on a page-side handler ever responding. NOTE: closing a
+     * CefBrowser is still asynchronous either way (this posts a close
+     * request and returns; teardown completes later via
+     * CefLifeSpanHandler.onBeforeClose) -- this alias satisfies the
+     * interface, it does not make close synchronous.
+     */
+    @Override
+    default void close() {
+        close(true);
+    }
 
     /**
      * Allow the browser to close.

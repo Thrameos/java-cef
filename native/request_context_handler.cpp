@@ -3,6 +3,7 @@
 // can be found in the LICENSE file.
 
 #include "request_context_handler.h"
+#include "jcef_trace.h"
 
 #include "jni_util.h"
 #include "resource_request_handler.h"
@@ -20,6 +21,7 @@ RequestContextHandler::GetResourceRequestHandler(
     bool is_download,
     const CefString& request_initiator,
     bool& disable_default_handling) {
+  JCEF_TRACE("RequestContextHandler::GetResourceRequestHandler() ENTER");
   ScopedJNIEnv env;
   if (!env)
     return nullptr;

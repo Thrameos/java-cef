@@ -3,6 +3,7 @@
 // can be found in the LICENSE file.
 
 #include "load_handler.h"
+#include "jcef_trace.h"
 
 #include "client_handler.h"
 #include "jni_util.h"
@@ -15,6 +16,7 @@ void LoadHandler::OnLoadingStateChange(CefRefPtr<CefBrowser> browser,
                                        bool isLoading,
                                        bool canGoBack,
                                        bool canGoForward) {
+  JCEF_TRACE("LoadHandler::OnLoadingStateChange() ENTER");
   ScopedJNIEnv env;
   if (!env)
     return;
@@ -32,6 +34,7 @@ void LoadHandler::OnLoadingStateChange(CefRefPtr<CefBrowser> browser,
 void LoadHandler::OnLoadStart(CefRefPtr<CefBrowser> browser,
                               CefRefPtr<CefFrame> frame,
                               TransitionType transition_type) {
+  JCEF_TRACE("LoadHandler::OnLoadStart() ENTER");
   ScopedJNIEnv env;
   if (!env)
     return;
@@ -50,6 +53,7 @@ void LoadHandler::OnLoadStart(CefRefPtr<CefBrowser> browser,
 void LoadHandler::OnLoadEnd(CefRefPtr<CefBrowser> browser,
                             CefRefPtr<CefFrame> frame,
                             int httpStatusCode) {
+  JCEF_TRACE("LoadHandler::OnLoadEnd() ENTER");
   ScopedJNIEnv env;
   if (!env)
     return;
@@ -69,6 +73,7 @@ void LoadHandler::OnLoadError(CefRefPtr<CefBrowser> browser,
                               ErrorCode errorCode,
                               const CefString& errorText,
                               const CefString& failedUrl) {
+  JCEF_TRACE("LoadHandler::OnLoadError() ENTER");
   ScopedJNIEnv env;
   if (!env)
     return;

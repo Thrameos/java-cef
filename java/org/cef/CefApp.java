@@ -4,9 +4,12 @@
 
 package org.cef;
 
+import org.cef.browser.CefRequestContext;
 import org.cef.callback.CefSchemeHandlerFactory;
+import org.cef.callback.Disposable;
 import org.cef.handler.CefAppHandler;
 import org.cef.handler.CefAppHandlerAdapter;
+import org.cef.network.CefCookieManager;
 
 import java.awt.event.ActionEvent;
 import java.awt.event.ActionListener;
@@ -15,6 +18,7 @@ import java.io.FilenameFilter;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.HashSet;
+import java.util.logging.Logger;
 
 import javax.swing.SwingUtilities;
 import javax.swing.Timer;
@@ -22,7 +26,9 @@ import javax.swing.Timer;
 /**
  * Exposes static methods for managing the global CEF context.
  */
-public class CefApp extends CefAppHandlerAdapter {
+public class CefApp extends CefAppHandlerAdapter implements Disposable {
+    private static final Logger LOGGER = Logger.getLogger(CefApp.class.getName());
+
     public final class CefVersion {
         public final int JCEF_COMMIT_NUMBER;
 
@@ -145,6 +151,7 @@ public class CefApp extends CefAppHandlerAdapter {
      */
     private CefApp(String[] args, CefSettings settings) throws UnsatisfiedLinkError {
         super(args);
+        LOGGER.fine(() -> "CefApp() constructor ENTER on " + Thread.currentThread());
         if (settings != null) settings_ = settings.clone();
         if (OS.isWindows()) {
             SystemBootstrap.loadLibrary("jawt");
@@ -165,9 +172,11 @@ public class CefApp extends CefAppHandlerAdapter {
             Runnable r = new Runnable() {
                 @Override
                 public void run() {
+                    LOGGER.fine(() -> "CefApp N_PreInitialize() CALL on " + Thread.currentThread());
                     // Perform native pre-initialization.
                     if (!N_PreInitialize())
                         throw new IllegalStateException("Failed to pre-initialize native code");
+                    LOGGER.fine("CefApp N_PreInitialize() RETURNED ok");
                 }
             };
             if (SwingUtilities.isEventDispatchThread())
@@ -276,6 +285,7 @@ public class CefApp extends CefAppHandlerAdapter {
      * message loop is terminated and CEF is shutdown.
      */
     public synchronized final void dispose() {
+        LOGGER.fine(() -> "CefApp.dispose() ENTER state=" + getState() + " clients=" + clients_.size());
         switch (getState()) {
             case NEW:
                 // Nothing to do inspite of invalidating the state
@@ -430,7 +440,10 @@ public class CefApp extends CefAppHandlerAdapter {
                         }
                     }
 
-                    if (N_Initialize(appHandler_, settings)) {
+                    LOGGER.fine(() -> "CefApp N_Initialize() CALL on " + Thread.currentThread());
+                    boolean initOk = N_Initialize(appHandler_, settings);
+                    LOGGER.fine(() -> "CefApp N_Initialize() RETURNED " + initOk);
+                    if (initOk) {
                         setState(CefAppState.INITIALIZED);
                     } else {
                         setState(CefAppState.INITIALIZATION_FAILED);
@@ -474,9 +487,51 @@ public class CefApp extends CefAppHandlerAdapter {
             @Override
             public void run() {
                 System.out.println("shutdown on " + Thread.currentThread());
+                LOGGER.fine(() -> "CefApp.shutdown() Runnable ENTER on " + Thread.currentThread());
+
+                // Cancel any pending message-pump Timer tick before it can
+                // fire after native shutdown below. Belt-and-suspenders
+                // alongside doMessageLoopWork()'s own TERMINATED check (see
+                // that method's comment for the full race this guards
+                // against) -- stopping it here closes the window even
+                // earlier, before N_Shutdown() runs at all.
+                if (workTimer_ != null) {
+                    workTimer_.stop();
+                    workTimer_ = null;
+                }
+
+                // Release the persistent native reference to the global request
+                // context before shutting down CEF -- otherwise it remains
+                // registered in CEF's internal browser-context tracking past
+                // CefShutdown(), tripping a DCHECK during final process teardown.
+                // See Thrameos/java-cef#23.
+                LOGGER.fine("CefApp.shutdown() disposeGlobalContext/disposeGlobalManager");
+                CefRequestContext.disposeGlobalContext();
+                CefCookieManager.disposeGlobalManager();
+
+                // Cancel any pending message-pump Timer tick before it can
+                // fire after native shutdown below. Belt-and-suspenders
+                // alongside doMessageLoopWork()'s own TERMINATED check (see
+                // that method's comment for the full race this guards
+                // against) -- stopping it here closes the window even
+                // earlier, before N_Shutdown() runs at all.
+                if (workTimer_ != null) {
+                    workTimer_.stop();
+                    workTimer_ = null;
+                }
+
+                // Release the persistent native reference to the global request
+                // context before shutting down CEF -- otherwise it remains
+                // registered in CEF's internal browser-context tracking past
+                // CefShutdown(), tripping a DCHECK during final process teardown.
+                // See Thrameos/java-cef#23.
+                CefRequestContext.disposeGlobalContext();
+                CefCookieManager.disposeGlobalManager();
 
                 // Shutdown native CEF.
+                LOGGER.fine("CefApp.shutdown() N_Shutdown() CALL");
                 N_Shutdown();
+                LOGGER.fine("CefApp.shutdown() N_Shutdown() RETURNED");
 
                 setState(CefAppState.TERMINATED);
                 CefApp.self = null;
@@ -521,6 +576,29 @@ public class CefApp extends CefAppHandlerAdapter {
                             // Timer has timed out.
                             workTimer_.stop();
                             workTimer_ = null;
+
+                            // Same guard as the outer invokeLater Runnable's own
+                            // check above -- necessary here too, not redundant.
+                            // This Timer is scheduled independently (up to
+                            // ~33ms in the future) and shutdown() below doesn't
+                            // cancel a pending one, so a tick can still fire
+                            // after native shutdown has already destroyed the
+                            // singleton Context (Context::Destroy() in
+                            // N_Shutdown() -- see native/CefApp.cpp). Without
+                            // this check, N_DoMessageLoopWork() calls
+                            // Context::GetInstance()->DoMessageLoopWork() on a
+                            // null Context* (GetInstance() returns null post-
+                            // Destroy()) -- silently harmless in Release
+                            // (DoMessageLoopWork()'s only DCHECK is compiled
+                            // out there, so the null `this` is never actually
+                            // dereferenced), but a real SIGSEGV in Debug
+                            // builds when that DCHECK evaluates
+                            // thread_checker_.CalledOnValidThread() on the
+                            // freed object -- confirmed via a live crash
+                            // (pthread_mutex_lock fault inside
+                            // Context::DoMessageLoopWork()) hit intermittently
+                            // in this repo's Debug/coverage test suite.
+                            if (getState() == CefAppState.TERMINATED) return;
 
                             N_DoMessageLoopWork();
 

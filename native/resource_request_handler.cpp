@@ -3,6 +3,7 @@
 // can be found in the LICENSE file.
 
 #include "resource_request_handler.h"
+#include "jcef_trace.h"
 
 #include "cookie_access_filter.h"
 #include "jni_util.h"
@@ -16,6 +17,7 @@ CefRefPtr<CefCookieAccessFilter> ResourceRequestHandler::GetCookieAccessFilter(
     CefRefPtr<CefBrowser> browser,
     CefRefPtr<CefFrame> frame,
     CefRefPtr<CefRequest> request) {
+  JCEF_TRACE("ResourceRequestHandler::GetCookieAccessFilter() ENTER");
   ScopedJNIEnv env;
   if (!env)
     return nullptr;
@@ -45,6 +47,7 @@ ResourceRequestHandler::OnBeforeResourceLoad(CefRefPtr<CefBrowser> browser,
                                              CefRefPtr<CefFrame> frame,
                                              CefRefPtr<CefRequest> request,
                                              CefRefPtr<CefCallback> callback) {
+  JCEF_TRACE("ResourceRequestHandler::OnBeforeResourceLoad() ENTER");
   ScopedJNIEnv env;
   if (!env)
     return RV_CONTINUE;
@@ -69,6 +72,7 @@ CefRefPtr<CefResourceHandler> ResourceRequestHandler::GetResourceHandler(
     CefRefPtr<CefBrowser> browser,
     CefRefPtr<CefFrame> frame,
     CefRefPtr<CefRequest> request) {
+  JCEF_TRACE("ResourceRequestHandler::GetResourceHandler() ENTER");
   ScopedJNIEnv env;
   if (!env)
     return nullptr;
@@ -97,6 +101,7 @@ void ResourceRequestHandler::OnResourceRedirect(CefRefPtr<CefBrowser> browser,
                                                 CefRefPtr<CefRequest> request,
                                                 CefRefPtr<CefResponse> response,
                                                 CefString& new_url) {
+  JCEF_TRACE("ResourceRequestHandler::OnResourceRedirect() ENTER");
   ScopedJNIEnv env;
   if (!env)
     return;
@@ -126,6 +131,7 @@ bool ResourceRequestHandler::OnResourceResponse(
     CefRefPtr<CefFrame> frame,
     CefRefPtr<CefRequest> request,
     CefRefPtr<CefResponse> response) {
+  JCEF_TRACE("ResourceRequestHandler::OnResourceResponse() ENTER");
   ScopedJNIEnv env;
   if (!env)
     return false;
@@ -155,6 +161,7 @@ void ResourceRequestHandler::OnResourceLoadComplete(
     CefRefPtr<CefResponse> response,
     CefResourceRequestHandler::URLRequestStatus status,
     int64_t received_content_length) {
+  JCEF_TRACE("ResourceRequestHandler::OnResourceLoadComplete() ENTER");
   ScopedJNIEnv env;
   if (!env)
     return;
@@ -181,6 +188,7 @@ void ResourceRequestHandler::OnProtocolExecution(CefRefPtr<CefBrowser> browser,
                                                  CefRefPtr<CefFrame> frame,
                                                  CefRefPtr<CefRequest> request,
                                                  bool& allow_os_execution) {
+  JCEF_TRACE("ResourceRequestHandler::OnProtocolExecution() ENTER");
   ScopedJNIEnv env;
   if (!env)
     return;

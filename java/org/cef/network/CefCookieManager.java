@@ -6,6 +6,7 @@ package org.cef.network;
 
 import org.cef.callback.CefCompletionCallback;
 import org.cef.callback.CefCookieVisitor;
+import org.cef.callback.Disposable;
 
 import java.util.Vector;
 
@@ -13,7 +14,7 @@ import java.util.Vector;
  * Class used for managing cookies. The methods of this class may be called on any thread unless
  * otherwise indicated.
  */
-public abstract class CefCookieManager {
+public abstract class CefCookieManager implements Disposable {
     // This CTOR can't be called directly. Call method create() instead.
     CefCookieManager() {}
 
@@ -30,6 +31,15 @@ public abstract class CefCookieManager {
      */
     public static final CefCookieManager getGlobalManager() {
         return CefCookieManager_N.getGlobalManagerNative();
+    }
+
+    /**
+     * Used internally by {@link org.cef.CefApp}'s shutdown sequence to release the single
+     * persistent native reference cached by {@link #getGlobalManager()} before native CEF
+     * shutdown runs. Not intended for application use.
+     */
+    public static final void disposeGlobalManager() {
+        CefCookieManager_N.disposeGlobalManagerNative();
     }
 
     /**

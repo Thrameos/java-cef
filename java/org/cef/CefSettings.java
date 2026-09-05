@@ -60,7 +60,14 @@ public class CefSettings {
         private ColorType() {}
 
         public ColorType(int alpha, int red, int green, int blue) {
-            color_value = (alpha << 24) | (red << 16) | (green << 8) | (blue << 0);
+            // Pack in long-typed arithmetic and mask to 32 bits -- packing in
+            // int arithmetic first (as this used to) sign-extends into the
+            // long's upper 32 bits whenever alpha >= 0x80 (the sign bit of
+            // the intermediate 32-bit result), instead of the plain unsigned
+            // 32-bit ARGB value this field's own Javadoc describes. See
+            // Thrameos/java-cef#8.
+            color_value = ((long) alpha << 24 | (long) red << 16 | (long) green << 8 | blue)
+                    & 0xFFFFFFFFL;
         }
 
         public long getColor() {

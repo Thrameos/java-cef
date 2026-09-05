@@ -4,6 +4,7 @@
 
 package org.cef.browser;
 
+import org.cef.callback.Disposable;
 import org.cef.handler.CefRequestContextHandler;
 
 import java.util.HashMap;
@@ -24,7 +25,7 @@ import java.util.Map;
  * passed into the CefClient.createBrowser method and all other request
  * context objects will be ignored.
  */
-public abstract class CefRequestContext {
+public abstract class CefRequestContext implements Disposable {
     // This CTOR can't be called directly. Call method create() instead.
     CefRequestContext() {}
 
@@ -40,6 +41,15 @@ public abstract class CefRequestContext {
      */
     public static final CefRequestContext createContext(CefRequestContextHandler handler) {
         return CefRequestContext_N.createNative(handler);
+    }
+
+    /**
+     * Used internally by {@link org.cef.CefApp}'s shutdown sequence to release the single
+     * persistent native reference cached by {@link #getGlobalContext()} before native CEF
+     * shutdown runs. Not intended for application use.
+     */
+    public static final void disposeGlobalContext() {
+        CefRequestContext_N.disposeGlobalContextNative();
     }
 
     public abstract void dispose();

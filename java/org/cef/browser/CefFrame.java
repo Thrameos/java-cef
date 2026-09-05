@@ -4,10 +4,12 @@
 
 package org.cef.browser;
 
+import org.cef.callback.Disposable;
+
 /**
  * Interface representing a frame.
  */
-public interface CefFrame {
+public interface CefFrame extends Disposable {
     /**
      * Removes the native reference from an unused object.
      */

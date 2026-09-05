@@ -425,6 +425,7 @@ CefRefPtr<CefValue> GetCefValueFromJNIMap(JNIEnv* env, const jobject& obj) {
   }
 
   CefRefPtr<CefValue> value = CefValue::Create();
+  value->SetDictionary(dict);
   return value;
 }
 
@@ -1290,7 +1291,7 @@ bool GetJNIPoint(JNIEnv* env, jobject obj, int* x, int* y) {
 }
 
 CefRefPtr<CefBrowser> GetJNIBrowser(JNIEnv* env, jobject jbrowser) {
-  return GetCefFromJNIObject<CefBrowser>(env, jbrowser, "CefBrowser");
+  return GetCefFromJNIObject_sync<CefBrowser>(env, jbrowser, "CefBrowser");
 }
 
 jobject GetJNIEnumValue(JNIEnv* env,

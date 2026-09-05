@@ -3,6 +3,7 @@
 // can be found in the LICENSE file.
 
 #include "render_handler.h"
+#include "jcef_trace.h"
 
 #include "client_handler.h"
 #include "jni_util.h"
@@ -71,30 +72,36 @@ bool GetJNIScreenInfo(JNIEnv* env, jobject jScreenInfo, CefScreenInfo& dest) {
     return false;
   }
 
-  ScopedJNIObjectLocal obj(env, jScreenInfo);
-  if (!obj) {
+  // jScreenInfo is a local ref owned by the caller (e.g. GetScreenInfo()'s own
+  // ScopedJNIObjectLocal) -- don't wrap it in a second ScopedJNIObjectLocal
+  // here, which would DeleteLocalRef it a second time when this function
+  // returns (undefined behavior per the JNI spec). Only field reads are
+  // needed below, which don't require owning the ref.
+  if (!jScreenInfo) {
     return false;
   }
   double tmp;
-  if (!GetJNIFieldDouble(env, cls, obj, "device_scale_factor", &tmp)) {
+  if (!GetJNIFieldDouble(env, cls, jScreenInfo, "device_scale_factor", &tmp)) {
     return false;
   }
   dest.device_scale_factor = (float)tmp;
 
-  if (GetJNIFieldInt(env, cls, obj, "depth", &(dest.depth)) &&
-      GetJNIFieldInt(env, cls, obj, "depth_per_component",
+  if (GetJNIFieldInt(env, cls, jScreenInfo, "depth", &(dest.depth)) &&
+      GetJNIFieldInt(env, cls, jScreenInfo, "depth_per_component",
                      &(dest.depth_per_component)) &&
-      GetJNIFieldBoolean(env, cls, obj, "is_monochrome",
+      GetJNIFieldBoolean(env, cls, jScreenInfo, "is_monochrome",
                          &(dest.is_monochrome)) &&
-      GetJNIFieldInt(env, cls, obj, "x", &(dest.rect.x)) &&
-      GetJNIFieldInt(env, cls, obj, "y", &(dest.rect.y)) &&
-      GetJNIFieldInt(env, cls, obj, "width", &(dest.rect.width)) &&
-      GetJNIFieldInt(env, cls, obj, "height", &(dest.rect.height)) &&
-      GetJNIFieldInt(env, cls, obj, "available_x", &(dest.available_rect.x)) &&
-      GetJNIFieldInt(env, cls, obj, "available_y", &(dest.available_rect.y)) &&
-      GetJNIFieldInt(env, cls, obj, "available_width",
+      GetJNIFieldInt(env, cls, jScreenInfo, "x", &(dest.rect.x)) &&
+      GetJNIFieldInt(env, cls, jScreenInfo, "y", &(dest.rect.y)) &&
+      GetJNIFieldInt(env, cls, jScreenInfo, "width", &(dest.rect.width)) &&
+      GetJNIFieldInt(env, cls, jScreenInfo, "height", &(dest.rect.height)) &&
+      GetJNIFieldInt(env, cls, jScreenInfo, "available_x",
+                     &(dest.available_rect.x)) &&
+      GetJNIFieldInt(env, cls, jScreenInfo, "available_y",
+                     &(dest.available_rect.y)) &&
+      GetJNIFieldInt(env, cls, jScreenInfo, "available_width",
                      &(dest.available_rect.width)) &&
-      GetJNIFieldInt(env, cls, obj, "available_height",
+      GetJNIFieldInt(env, cls, jScreenInfo, "available_height",
                      &(dest.available_rect.height))
 
   ) {
@@ -149,6 +156,7 @@ RenderHandler::RenderHandler(JNIEnv* env, jobject handler)
 
 bool RenderHandler::GetRootScreenRect(CefRefPtr<CefBrowser> browser,
                                       CefRect& rect) {
+  JCEF_TRACE("RenderHandler::GetRootScreenRect() ENTER");
   ScopedJNIEnv env;
   if (!env)
     return false;
@@ -159,6 +167,7 @@ bool RenderHandler::GetRootScreenRect(CefRefPtr<CefBrowser> browser,
 }
 
 void RenderHandler::GetViewRect(CefRefPtr<CefBrowser> browser, CefRect& rect) {
+  JCEF_TRACE("RenderHandler::GetViewRect() ENTER");
   ScopedJNIEnv env;
   if (!env)
     return;
@@ -181,6 +190,7 @@ void RenderHandler::GetViewRect(CefRefPtr<CefBrowser> browser, CefRect& rect) {
 /*--cef()--*/
 bool RenderHandler::GetScreenInfo(CefRefPtr<CefBrowser> browser,
                                   CefScreenInfo& screen_info) {
+  JCEF_TRACE("RenderHandler::GetScreenInfo() ENTER");
   ScopedJNIEnv env;
   if (!env) {
     return false;
@@ -212,6 +222,7 @@ bool RenderHandler::GetScreenPoint(CefRefPtr<CefBrowser> browser,
                                    int viewY,
                                    int& screenX,
                                    int& screenY) {
+  JCEF_TRACE("RenderHandler::GetScreenPoint() ENTER");
   ScopedJNIEnv env;
   if (!env)
     return false;
@@ -221,6 +232,7 @@ bool RenderHandler::GetScreenPoint(CefRefPtr<CefBrowser> browser,
 }
 
 void RenderHandler::OnPopupShow(CefRefPtr<CefBrowser> browser, bool show) {
+  JCEF_TRACE("RenderHandler::OnPopupShow() ENTER");
   ScopedJNIEnv env;
   if (!env)
     return;
@@ -233,6 +245,7 @@ void RenderHandler::OnPopupShow(CefRefPtr<CefBrowser> browser, bool show) {
 
 void RenderHandler::OnPopupSize(CefRefPtr<CefBrowser> browser,
                                 const CefRect& rect) {
+  JCEF_TRACE("RenderHandler::OnPopupSize() ENTER");
   ScopedJNIEnv env;
   if (!env)
     return;
@@ -253,6 +266,7 @@ void RenderHandler::OnPaint(CefRefPtr<CefBrowser> browser,
                             const void* buffer,
                             int width,
                             int height) {
+  JCEF_TRACE("RenderHandler::OnPaint() ENTER");
   ScopedJNIEnv env;
   if (!env)
     return;
@@ -275,6 +289,7 @@ bool RenderHandler::StartDragging(CefRefPtr<CefBrowser> browser,
                                   DragOperationsMask allowed_ops,
                                   int x,
                                   int y) {
+  JCEF_TRACE("RenderHandler::StartDragging() ENTER");
   ScopedJNIEnv env;
   if (!env)
     return false;
@@ -294,6 +309,7 @@ bool RenderHandler::StartDragging(CefRefPtr<CefBrowser> browser,
 
 void RenderHandler::UpdateDragCursor(CefRefPtr<CefBrowser> browser,
                                      DragOperation operation) {
+  JCEF_TRACE("RenderHandler::UpdateDragCursor() ENTER");
   ScopedJNIEnv env;
   if (!env)
     return;
@@ -305,6 +321,7 @@ void RenderHandler::UpdateDragCursor(CefRefPtr<CefBrowser> browser,
 }
 
 bool RenderHandler::GetViewRect(jobject browser, CefRect& rect) {
+  JCEF_TRACE("RenderHandler::GetViewRect() ENTER");
   ScopedJNIEnv env;
   if (!env)
     return false;
@@ -325,6 +342,7 @@ bool RenderHandler::GetScreenPoint(jobject browser,
                                    int viewY,
                                    int& screenX,
                                    int& screenY) {
+  JCEF_TRACE("RenderHandler::GetScreenPoint() ENTER");
   ScopedJNIEnv env;
   if (!env)
     return false;

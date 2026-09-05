@@ -39,13 +39,29 @@ Java_org_cef_CefApp_N_1Initialize(JNIEnv* env,
 }
 
 JNIEXPORT void JNICALL Java_org_cef_CefApp_N_1Shutdown(JNIEnv* env, jobject) {
-  Context::GetInstance()->Shutdown();
+  Context* context = Context::GetInstance();
+  if (!context)
+    return;
+  context->Shutdown();
   Context::Destroy();
 }
 
 JNIEXPORT void JNICALL Java_org_cef_CefApp_N_1DoMessageLoopWork(JNIEnv* env,
                                                                 jobject) {
-  Context::GetInstance()->DoMessageLoopWork();
+  // CefApp.java's doMessageLoopWork() guards its own call sites against
+  // this with a CefAppState.TERMINATED check (see that method's own
+  // comment for the full race -- a pending message-pump Timer tick that
+  // outlives native shutdown), but a defensive null check here is cheap
+  // and protects every call site, current and future, not just the one
+  // this was root-caused through. Context::GetInstance() legitimately
+  // returns null once Context::Destroy() has run (Java_org_cef_CefApp_
+  // N_1Shutdown above); calling into a destroyed Context is a null-`this`
+  // member call that DoMessageLoopWork()'s own DCHECK (Debug builds only)
+  // dereferences, not something that fails safely on its own.
+  Context* context = Context::GetInstance();
+  if (!context)
+    return;
+  context->DoMessageLoopWork();
 }
 
 JNIEXPORT jobject JNICALL Java_org_cef_CefApp_N_1GetVersion(JNIEnv* env,

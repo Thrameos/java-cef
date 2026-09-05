@@ -23,6 +23,13 @@ CefRefPtr<CefMessageRouter> GetSelf(jlong self) {
 CefRefPtr<MessageRouterHandler> GetHandler(JNIEnv* env,
                                            jobject jrouterHandler,
                                            bool allow_create) {
+  // ScopedJNIObject's attach-to-existing-handle constructor DCHECKs its
+  // handle is non-null, so a null |jrouterHandler| (a documented-legal
+  // input at every caller of this helper -- see CefMessageRouter.java's
+  // cancelPending()) must never reach it.
+  if (!jrouterHandler)
+    return nullptr;
+
   ScopedJNIObject<MessageRouterHandler> jrouterHandlerObj(
       env, jrouterHandler, false /* should_delete */,
       "CefMessageRouterHandler");
@@ -53,7 +60,7 @@ JNIEXPORT void JNICALL
 Java_org_cef_browser_CefMessageRouter_1N_N_1Dispose(JNIEnv* env,
                                                     jobject obj,
                                                     jlong self) {
-  SetCefForJNIObject<CefMessageRouterBrowserSide>(env, obj, nullptr,
+  SetCefForJNIObject_sync<CefMessageRouterBrowserSide>(env, obj, nullptr,
                                                   kCefClassName);
 }
 
@@ -111,7 +118,7 @@ Java_org_cef_browser_CefMessageRouter_1N_N_1RemoveHandler(
   }
 
   // Remove JNI reference on jrouterhandler added by the ScopedJNIObject
-  SetCefForJNIObject<MessageRouterHandler>(env, jrouterHandler, nullptr,
+  SetCefForJNIObject_sync<MessageRouterHandler>(env, jrouterHandler, nullptr,
                                            "CefMessageRouterHandler");
 
   return JNI_TRUE;

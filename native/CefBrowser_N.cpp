@@ -12,9 +12,11 @@
 
 #include "browser_process_handler.h"
 #include "client_handler.h"
+#include "context.h"
 #include "critical_wait.h"
 #include "devtools_message_observer.h"
 #include "int_callback.h"
+#include "jcef_trace.h"
 #include "jni_util.h"
 #include "life_span_handler.h"
 #include "pdf_print_callback.h"
@@ -22,6 +24,7 @@
 #include "run_file_dialog_callback.h"
 #include "string_visitor.h"
 #include "temp_window.h"
+#include "util.h"
 #include "window_handler.h"
 
 #if defined(OS_LINUX)
@@ -930,8 +933,9 @@ void create(std::shared_ptr<JNIObjectsForCreate> objs,
             jboolean osr,
             jboolean transparent) {
   ScopedJNIEnv env;
-  CefRefPtr<ClientHandler> clientHandler = GetCefFromJNIObject<ClientHandler>(
-      env, objs->jclientHandler, "CefClientHandler");
+  CefRefPtr<ClientHandler> clientHandler =
+      GetCefFromJNIObject_sync<ClientHandler>(env, objs->jclientHandler,
+                                              "CefClientHandler");
   if (!clientHandler.get())
     return;
 
@@ -940,8 +944,8 @@ void create(std::shared_ptr<JNIObjectsForCreate> objs,
   if (!lifeSpanHandler.get())
     return;
 
-  CefRefPtr<CefBrowser> parentBrowser =
-      GetCefFromJNIObject<CefBrowser>(env, objs->jparentBrowser, "CefBrowser");
+  CefRefPtr<CefBrowser> parentBrowser = GetCefFromJNIObject_sync<CefBrowser>(
+      env, objs->jparentBrowser, "CefBrowser");
 
   CefWindowInfo windowInfo;
   CefBrowserSettings settings;
@@ -1015,8 +1019,9 @@ void create(std::shared_ptr<JNIObjectsForCreate> objs,
   CefRefPtr<CefBrowser> browserObj;
   CefString strUrl = GetJNIString(env, static_cast<jstring>(objs->url.get()));
 
-  CefRefPtr<CefRequestContext> context = GetCefFromJNIObject<CefRequestContext>(
-      env, objs->jcontext, "CefRequestContext");
+  CefRefPtr<CefRequestContext> context =
+      GetCefFromJNIObject_sync<CefRequestContext>(env, objs->jcontext,
+                                                  "CefRequestContext");
 
   // Add a global ref that will be released in LifeSpanHandler::OnAfterCreated.
   jobject globalRef = env->NewGlobalRef(objs->jbrowser);
@@ -1494,20 +1499,49 @@ JNIEXPORT void JNICALL
 Java_org_cef_browser_CefBrowser_1N_N_1Close(JNIEnv* env,
                                             jobject obj,
                                             jboolean force) {
+  // Liveness guard against issue #10/#4/#23's family -- see
+  // JNI_REQUIRE_CEF_ALIVE_OR_RETURN's own comment (jni_util.h).
+  // CefBrowser_N.java's finalize() calls close(true) -> here; confirmed via
+  // tools_native/issue10_repro's ISSUE10_REPRO_LATE_CLOSE mode that calling
+  // this exact native path (GetHost()->CloseBrowser()) on a browser left
+  // open at CefShutdown() time is a real, reproducible trigger for the
+  // browser_context.cc:44 DCHECK.
+  JNI_REQUIRE_CEF_ALIVE_OR_RETURN();
   CefRefPtr<CefBrowser> browser = JNI_GET_BROWSER_OR_RETURN(env, obj);
+  JCEF_TRACE("CefBrowser_N::N_Close() ENTER browser_id=%d force=%d osr=%d",
+             browser->GetIdentifier(), force != JNI_FALSE,
+             browser->GetHost()->IsWindowRenderingDisabled());
   if (force != JNI_FALSE) {
     if (browser->GetHost()->IsWindowRenderingDisabled()) {
       browser->GetHost()->CloseBrowser(true);
+#if defined(OS_LINUX)
+      // A browser whose renderer process already died (e.g. via the
+      // chrome://crash debug URL) does not reliably fire a real
+      // OnBeforeClose() when closed afterward -- confirmed 2026-09-03 as a
+      // genuine full-suite hang. See util::ScheduleOnBeforeCloseFallback()'s
+      // own comment (util_linux.cpp) -- safe to call unconditionally, a
+      // no-op if the real OnBeforeClose() already ran.
+      util::ScheduleOnBeforeCloseFallback(browser);
+#endif
     } else {
       // Destroy the native window representation.
-      if (CefCurrentlyOn(TID_UI))
+      if (CefCurrentlyOn(TID_UI)) {
+        JCEF_TRACE(
+            "CefBrowser_N::N_Close() already on TID_UI, calling "
+            "util::DestroyCefBrowser() synchronously");
         util::DestroyCefBrowser(browser);
-      else
+      } else {
+        JCEF_TRACE(
+            "CefBrowser_N::N_Close() NOT on TID_UI, posting "
+            "util::DestroyCefBrowser() to TID_UI");
         CefPostTask(TID_UI, base::BindOnce(&util::DestroyCefBrowser, browser));
+      }
     }
   } else {
     browser->GetHost()->CloseBrowser(false);
   }
+  JCEF_TRACE("CefBrowser_N::N_Close() EXIT browser_id=%d",
+             browser->GetIdentifier());
 }
 
 JNIEXPORT void JNICALL
@@ -1523,12 +1557,21 @@ Java_org_cef_browser_CefBrowser_1N_N_1SetWindowVisibility(JNIEnv* env,
                                                           jobject obj,
                                                           jboolean visible) {
   CefRefPtr<CefBrowser> browser = JNI_GET_BROWSER_OR_RETURN(env, obj);
+  CefRefPtr<CefBrowserHost> host = browser->GetHost();
+
+  // Windowless (OSR) browsers have no native window for the OS-level
+  // visibility toggle below -- CefBrowserHost::WasHidden() is CEF's own
+  // signal for this case (used to pause/resume rendering and GPU resource
+  // usage). Previously this whole function was a no-op for every OSR browser
+  // on every platform except this one macOS branch, and even that branch had
+  // the windowless check backwards (skipped exactly when windowless).
+  if (host->IsWindowRenderingDisabled()) {
+    host->WasHidden(visible == JNI_FALSE);
+    return;
+  }
 
 #if defined(OS_MACOSX)
-  if (!browser->GetHost()->IsWindowRenderingDisabled()) {
-    util_mac::SetVisibility(browser->GetHost()->GetWindowHandle(),
-                            visible != JNI_FALSE);
-  }
+  util_mac::SetVisibility(host->GetWindowHandle(), visible != JNI_FALSE);
 #endif
 }
 JNIEXPORT jdouble JNICALL
@@ -2002,11 +2045,17 @@ Java_org_cef_browser_CefBrowser_1N_N_1SendMouseWheelEvent(
     CallJNIMethodI_V(env, cls, mouse_wheel_event, "getUnitsToScroll", &delta);
   }
 
+  // AWT's MouseWheelEvent convention is positive rotation/units == scroll
+  // content down/right, but CefMouseEvent's deltaX/deltaY (matching the
+  // native "wheel delta") is the opposite: positive == scroll content
+  // up/left. Negate so a given physical wheel gesture scrolls the same
+  // direction it would in a native browser window. See
+  // Thrameos/java-cef#14 (matches upstream cefclient issue #26).
   double deltaX = 0, deltaY = 0;
   if (cef_event.modifiers & EVENTFLAG_SHIFT_DOWN)
-    deltaX = delta;
+    deltaX = -delta;
   else
-    deltaY = delta;
+    deltaY = -delta;
 
   browser->GetHost()->SendMouseWheelEvent(cef_event, deltaX, deltaY);
 }
@@ -2019,7 +2068,7 @@ Java_org_cef_browser_CefBrowser_1N_N_1DragTargetDragEnter(JNIEnv* env,
                                                           jint jmodifiers,
                                                           jint allowedOps) {
   CefRefPtr<CefDragData> drag_data =
-      GetCefFromJNIObject<CefDragData>(env, jdragData, "CefDragData");
+      GetCefFromJNIObject_sync<CefDragData>(env, jdragData, "CefDragData");
   if (!drag_data.get())
     return;
   ScopedJNIClass cls(env, "java/awt/event/MouseEvent");

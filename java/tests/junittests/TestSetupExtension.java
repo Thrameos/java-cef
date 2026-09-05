@@ -9,6 +9,7 @@ import static org.junit.jupiter.api.extension.ExtensionContext.Namespace.GLOBAL;
 import org.cef.CefApp;
 import org.cef.CefApp.CefAppState;
 import org.cef.CefSettings;
+import org.cef.browser.CefBrowser;
 import org.cef.handler.CefAppHandlerAdapter;
 import org.junit.jupiter.api.extension.BeforeAllCallback;
 import org.junit.jupiter.api.extension.ExtensionContext;
@@ -57,18 +58,6 @@ public class TestSetupExtension
             return;
         }
 
-        CefApp.addAppHandler(new CefAppHandlerAdapter(null) {
-            @Override
-            public void stateHasChanged(org.cef.CefApp.CefAppState state) {
-                if (state == CefAppState.TERMINATED) {
-                    // Signal completion of CEF shutdown.
-                    countdown_.countDown();
-                }
-            }
-        });
-
-        // Initialize the singleton CefApp instance.
-        CefSettings settings = new CefSettings();
         // These CI/headless-environment flags are required for the test bench to
         // run on a display-less CI agent (no real GPU, no Vulkan driver): without
         // them a GPU-process crash during browser teardown triggers a slow (multi-
@@ -77,8 +66,281 @@ public class TestSetupExtension
         String[] args = {"--disable-gpu", "--disable-gpu-compositing", "--disable-dev-shm-usage",
                 "--no-sandbox", "--use-gl=disabled", "--disable-software-rasterizer",
                 "--disable-features=OnDeviceModel,OptimizationGuideOnDeviceModel,Vulkan,"
-                        + "VulkanFromANGLE,DefaultANGLEVulkan"};
+                        + "VulkanFromANGLE,DefaultANGLEVulkan",
+                // A synthetic camera/mic device so getUserMedia() can succeed on a
+                // CI agent with no real hardware -- see
+                // CefPermissionHandlerCoverageTest and ~/devel/cef's
+                // media_access_unittest.cc (this project's own reference for the
+                // same flag). Does NOT bypass CefPermissionHandler -- the
+                // permission request still reaches onRequestMediaAccessPermission
+                // and must be explicitly Continue()'d/Cancel()'d, only the
+                // underlying device is fake.
+                "--use-fake-device-for-media-stream"};
+
+        // IMPORTANT: pass `args` here, not null. CefApp.getInstance(args, settings)
+        // below only forwards `args` onto the command line via the *default*
+        // CefAppHandlerAdapter.onBeforeCommandLineProcessing() that CefApp installs
+        // on itself as appHandler_ -- but only if appHandler_ is still unset at
+        // that point. addAppHandler() here runs first and permanently replaces
+        // appHandler_, so if this adapter were constructed with `null` (as it
+        // originally was), the args above would be silently discarded and never
+        // reach the real Chromium command line -- discovered via CefCommandLineTest
+        // asserting on switches that turned out to never actually be set. Passing
+        // `args` through and delegating to super.onBeforeCommandLineProcessing()
+        // restores the forwarding this adapter's presence otherwise disables.
+        CefApp.addAppHandler(new CefAppHandlerAdapter(args) {
+            @Override
+            public void stateHasChanged(org.cef.CefApp.CefAppState state) {
+                if (state == CefAppState.TERMINATED) {
+                    // Signal completion of CEF shutdown.
+                    countdown_.countDown();
+                }
+            }
+
+            @Override
+            public void onBeforeCommandLineProcessing(
+                    String process_type, org.cef.callback.CefCommandLine command_line) {
+                super.onBeforeCommandLineProcessing(process_type, command_line);
+
+                // Fires once, synchronously, before any @Test runs -- the only way
+                // to obtain a real CefCommandLine (no public factory exists). Only
+                // snapshot the browser-process instance (process_type is null/empty
+                // there; helper/renderer processes would also invoke this). The
+                // live command_line object is not safe to hold onto past this
+                // callback (see TestSetupContext.CommandLineSnapshot's comment), so
+                // its getters are called and copied into plain data right here.
+                if ((process_type == null || process_type.isEmpty())
+                        && TestSetupContext.getCapturedCommandLineSnapshot() == null) {
+                    TestSetupContext.setCapturedCommandLineSnapshot(
+                            new TestSetupContext.CommandLineSnapshot(command_line.hasSwitches(),
+                                    command_line.getSwitches(), command_line.hasArguments(),
+                                    command_line.getArguments()));
+                }
+
+                // cefcmdline.mutate=true env var: see CefCommandLineMutationTask's
+                // class comment. Off by default -- only IsolatedRunner's dispatch of
+                // CefCommandLineMutationTask (via CefCommandLineMutationTest) sets
+                // this on the child process's environment, never a normal suite run,
+                // so this block never executes against the shared long-lived CefApp
+                // every other test class depends on.
+                if ((process_type == null || process_type.isEmpty())
+                        && "true".equals(System.getenv("cefcmdline.mutate"))) {
+                    TestSetupContext.setCapturedCommandLineMutationProbe(
+                            exerciseAndRestoreCommandLine(command_line));
+                }
+            }
+
+            @Override
+            public void onRegisterCustomSchemes(org.cef.callback.CefSchemeRegistrar registrar) {
+                // Fires once, synchronously, before any @Test runs -- the only way
+                // to obtain a real CefSchemeRegistrar (no public factory exists).
+                // Register a scheme once (expect true), then again with the same
+                // name (expect false, per this method's own Javadoc: "It should
+                // only be called once per unique schemeName value ... if
+                // schemeName is already registered ... this method will return
+                // false") -- exercises both the happy and unhappy path in one
+                // capture. See plan/roadmap.md Track A item 6.
+                boolean firstResult = registrar.addCustomScheme("jceftestscheme",
+                        true /* isStandard */, false /* isLocal */,
+                        false /* isDisplayIsolated */, false /* isSecure */,
+                        true /* isCorsEnabled */, false /* isCspBypassing */,
+                        true /* isFetchEnabled */);
+                boolean secondResult = registrar.addCustomScheme("jceftestscheme",
+                        true /* isStandard */, false /* isLocal */,
+                        false /* isDisplayIsolated */, false /* isSecure */,
+                        true /* isCorsEnabled */, false /* isCspBypassing */,
+                        true /* isFetchEnabled */);
+                TestSetupContext.setCapturedSchemeRegistrationResults(firstResult, secondResult);
+            }
+        });
+
+        // Initialize the singleton CefApp instance.
+        CefSettings settings = new CefSettings();
+
+        // LeakSweepIsolatedTest (via IsolatedRunner/LeakSweepTargetTask, see
+        // those classes' comments) launches one fresh JVM+CEF subprocess per
+        // leak-sweep target and hard-exits via Runtime.halt() as soon as
+        // that target's result is known, skipping this class's own close()
+        // (CefApp.dispose()) deliberately -- see IsolatedTaskRunnerTest's
+        // halt() comment for why. Left at the default (null) root_cache_path,
+        // every subprocess shares the same profile directory and its
+        // SingletonLock; a process that hard-exits instead of shutting down
+        // gracefully doesn't get a chance to release that lock the normal
+        // way, so the *next* subprocess to start can trip CEF's
+        // singleton-collision fatal path (observed directly: 7 of 8
+        // non-control targets crashed with SIGTRAP on startup, no output, in
+        // the first full isolated-sweep run before this fix).
+        // leak.cachePath, set by LeakSweepIsolatedTest to a fresh
+        // per-subprocess directory (as an env var, not a system property --
+        // see IsolatedRunner's class comment for why only env vars reach
+        // this process), routes around the shared profile entirely rather
+        // than trying to make hard-exit-then-immediately-restart safe
+        // against a lock this process never releases.
+        String isolatedCachePath = System.getProperty("leak.cachePath");
+        if (isolatedCachePath == null || isolatedCachePath.isEmpty()) {
+            isolatedCachePath = System.getenv("leak.cachePath");
+        }
+        if (isolatedCachePath != null && !isolatedCachePath.isEmpty()) {
+            settings.root_cache_path = isolatedCachePath;
+            settings.cache_path = isolatedCachePath;
+        }
+
         CefApp.getInstance(args, settings);
+
+        // Unconditional, not just for isolated leak-sweep processes (see
+        // leak.cachePath above, the case this warmup was originally written
+        // for) -- this is also GH issue #16: any *_N value-object's
+        // create() (CefPostDataElement, CefRequest, CefPrintSettings, ...)
+        // crashes with a native FATAL ("CppToC called with invalid version
+        // -1") if it's the first real CEF call in the process, with no
+        // browser ever created first. Confirmed via a pure-C++ repro
+        // (tools_native/leak_probe.cc/null_param_repro.cc) that the
+        // equivalent CEF calls DON'T crash there -- but that repro
+        // deliberately configures multi_threaded_message_loop=true,
+        // windowless_rendering_enabled=false, letting CEF drive its own
+        // native UI thread and pump its own message loop. This repo's real
+        // default (windowless_rendering_enabled=true, external_message_pump
+        // mode -- see CLAUDE.md) has no such thing: nothing but explicit
+        // doMessageLoopWork() calls (an app's ~30fps EDT Timer, normally)
+        // drives CEF's browser-process/IO-thread startup forward, and a
+        // manual pump loop alone isn't enough to reach whatever state only
+        // finishes as a side effect of creating a browser. No real JCEF app
+        // calls CefRequestContext.createContext()/CefPostDataElement.
+        // create()/etc. before ever creating a browser anyway, so this
+        // isn't a synthetic workaround so much as restoring the one
+        // precondition every real caller already satisfies -- and, since
+        // which test class happens to run first is otherwise an unstated,
+        // fragile dependency on JUnit5's default discovery order (see #16's
+        // own "how this was found" section), the only robust fix is to make
+        // every test run -- including a single class selected in isolation
+        // via --select-class -- start from that same precondition, not just
+        // the isolated leak-sweep case that happened to need it first.
+        warmUpBrowserProcess();
+    }
+
+    // Exercises CefCommandLine_N.cpp's N_Reset/N_GetProgram/N_SetProgram/
+    // N_HasSwitch/N_GetSwitchValue/N_AppendArgument directly on the real,
+    // live browser-process CefCommandLine -- the only instance reachable
+    // from Java, with no public factory -- then restores it to an
+    // equivalent state (same program, same switches, same arguments)
+    // before returning, so whatever CEF does with this object for the
+    // rest of browser-process startup is unaffected. Only called when the
+    // cefcmdline.mutate env var is "true" (see the call site above); that's
+    // only ever set by IsolatedRunner's dispatch of
+    // CefCommandLineMutationTask (via CefCommandLineMutationTest), never a
+    // normal suite run, so a real app/test never observes this.
+    private static TestSetupContext.CommandLineMutationProbe exerciseAndRestoreCommandLine(
+            org.cef.callback.CefCommandLine commandLine) {
+        String originalProgram = commandLine.getProgram(); // N_GetProgram
+        java.util.Map<String, String> originalSwitches = commandLine.getSwitches();
+        java.util.Vector<String> originalArguments = commandLine.getArguments();
+
+        boolean hadNoSandboxSwitch = commandLine.hasSwitch("no-sandbox"); // N_HasSwitch
+        String useGlSwitchValue = commandLine.getSwitchValue("use-gl"); // N_GetSwitchValue
+
+        commandLine.reset(); // N_Reset
+        // CEF's CefCommandLineImpl::SetProgram() CHECK-fails
+        // ("!program.empty()", command_line_ctocpp.cc:222) on an empty
+        // string -- confirmed the hard way (a Debug/coverage-build crash)
+        // when originalProgram came back "" for the real browser-process
+        // command line, which it legitimately does under JCEF (no argv[0]
+        // equivalent set this early for an embedded framework). reset()
+        // itself never touches the program component (see its own
+        // Javadoc), so there is no way to set the program back to "" via
+        // this API either way -- exercise N_SetProgram with a harmless
+        // placeholder instead when the original was empty; leaving that
+        // placeholder in place for the rest of this disposable subprocess
+        // is harmless (Chromium only uses it for cosmetic process-title
+        // reporting).
+        commandLine.setProgram(originalProgram.isEmpty() ? "jcef-coverage-probe" : originalProgram);
+        // A throwaway argument, immediately discarded by the second reset()
+        // below -- exists purely to exercise N_AppendArgument, since
+        // originalArguments is expected to be empty for the browser process
+        // (TestSetupExtension only ever passes switches, never bare
+        // arguments) and appending nothing would leave that downcall
+        // uncovered.
+        commandLine.appendArgument("jcef-coverage-probe-arg"); // N_AppendArgument
+        commandLine.reset();
+        if (!originalProgram.isEmpty()) {
+            commandLine.setProgram(originalProgram);
+        }
+        for (java.util.Map.Entry<String, String> entry : originalSwitches.entrySet()) {
+            if (entry.getValue() == null || entry.getValue().isEmpty()) {
+                commandLine.appendSwitch(entry.getKey());
+            } else {
+                commandLine.appendSwitchWithValue(entry.getKey(), entry.getValue());
+            }
+        }
+        for (String argument : originalArguments) {
+            commandLine.appendArgument(argument);
+        }
+
+        boolean restoredSwitchesMatch = commandLine.getSwitches().equals(originalSwitches);
+        boolean restoredArgumentsMatch = commandLine.getArguments().equals(originalArguments);
+
+        return new TestSetupContext.CommandLineMutationProbe(originalProgram, hadNoSandboxSwitch,
+                useGlSwitchValue, restoredSwitchesMatch, restoredArgumentsMatch);
+    }
+
+    private static void warmUpBrowserProcess() {
+        java.util.concurrent.CountDownLatch ready = new java.util.concurrent.CountDownLatch(1);
+        final String warmupUrl = "http://test.com/leak_sweep_warmup.html";
+        TestFrame frame = new TestFrame() {
+            @Override
+            protected void setupTest() {
+                addResource(warmupUrl, "<html><body>warmup</body></html>", "text/html");
+                createBrowser(warmupUrl, true /* useOSR */);
+                super.setupTest();
+            }
+
+            @Override
+            public void onLoadingStateChange(CefBrowser browser, boolean isLoading,
+                    boolean canGoBack, boolean canGoForward) {
+                if (!isLoading) {
+                    ready.countDown();
+                }
+            }
+        };
+        try {
+            if (!ready.await(30, java.util.concurrent.TimeUnit.SECONDS)) {
+                System.out.println(
+                        "TestSetupExtension.warmUpBrowserProcess: browser never finished "
+                        + "loading -- proceeding anyway, the isolated target run may crash.");
+            }
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        }
+        frame.terminateTest();
+        frame.awaitCompletion();
+
+        // Settle period, added 2026-08-30 after direct observation: without
+        // this, the very first target measured right after this warmup
+        // browser closes (even JniNoOpProbe.bareCall -- a truly empty
+        // native function, unrelated to browsers entirely) reliably read
+        // large, decaying RSS growth in its first several batches (~1966
+        // B/call in batch 0, tapering afterward). frame.awaitCompletion()
+        // only waits for the Java-side onBeforeClose/close handshake, not
+        // for CEF's own async native cleanup tasks posted as a side effect
+        // of browser teardown to actually finish running -- the exact same
+        // carryover-contamination mechanism already proven for the
+        // full-sweep case (see plan/LeakCheckerPort.md), just shrunk down
+        // to "warmup step -> the one real target" instead of "one leaky
+        // target -> the next". Pumping the external message loop gives any
+        // pending cleanup tasks a chance to actually run rather than sit
+        // queued.
+        long settleUntil = System.nanoTime() + java.util.concurrent.TimeUnit.SECONDS.toNanos(6);
+        while (System.nanoTime() < settleUntil) {
+            CefApp.getInstance().doMessageLoopWork(0);
+            try {
+                Thread.sleep(20);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                break;
+            }
+        }
+        System.gc();
+        System.runFinalization();
+        System.gc();
     }
 
     // Executed after all tests have completed.
@@ -96,10 +358,22 @@ public class TestSetupExtension
 
         CefApp.getInstance().dispose();
 
-        // Wait for CEF shutdown to complete.
+        // Wait for CEF shutdown to complete. Bounded (unlike the old
+        // unbounded countdown_.await()) so a browser whose close never
+        // completes -- confirmed for a browser whose renderer already died
+        // (e.g. CefRequestHandlerCoverageTest's deliberate chrome://crash)
+        // via a real hang caught in a full-suite run 2026-09-03 -- fails
+        // fast instead of blocking CI/the whole test run forever. See
+        // native/util_linux.cpp's OnBeforeClose fallback for the matching
+        // native-side fix to the underlying cause.
         try {
-            countdown_.await();
+            if (!countdown_.await(30, java.util.concurrent.TimeUnit.SECONDS)) {
+                System.out.println(
+                        "TestSetupExtension.close: CefApp shutdown never signaled "
+                        + "TERMINATED within 30s -- proceeding anyway. See GH #10.");
+            }
         } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
         }
     }
 }

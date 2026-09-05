@@ -21,10 +21,17 @@ CefRefPtr<CefResourceHandler> SchemeHandlerFactory::Create(
 
   ScopedJNIBrowser jbrowser(env, browser);
   ScopedJNIFrame jframe(env, frame);
-  jframe.SetTemporary();
+  // A standalone CefURLRequest (not associated with a browser navigation)
+  // calls this with a null |frame| -- ScopedJNIObject only creates a JNI
+  // handle (and sets created_handle_) when its wrapped object is non-null,
+  // so SetTemporary() must not be called unconditionally. See
+  // Thrameos/java-cef#24.
+  if (frame)
+    jframe.SetTemporary();
   ScopedJNIString jschemeName(env, scheme_name);
   ScopedJNIRequest jrequest(env, request);
-  jrequest.SetTemporary();
+  if (request)
+    jrequest.SetTemporary();
   ScopedJNIObjectResult jresult(env);
 
   JNI_CALL_METHOD(env, handle_, "create",

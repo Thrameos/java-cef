@@ -34,8 +34,11 @@ import java.awt.event.WindowAdapter;
 import java.awt.event.WindowEvent;
 import java.util.HashMap;
 import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
 
 import javax.swing.JFrame;
+
+import static org.junit.jupiter.api.Assertions.fail;
 
 // Base class for browsers that run tests.
 class TestFrame extends JFrame implements CefLifeSpanHandler, CefLoadHandler, CefRequestHandler,
@@ -137,13 +140,58 @@ class TestFrame extends JFrame implements CefLifeSpanHandler, CefLoadHandler, Ce
         }
     }
 
-    // Block until the test completes.
+    // A watchdog that force-closes this test's window/browser if the test
+    // doesn't complete in time, so a stuck browser (e.g. one that fell through
+    // to a real network request instead of being intercepted) never sits on
+    // screen indefinitely waiting for someone to close it by hand.
+    private final class Watchdog implements AutoCloseable {
+        private final java.util.Timer timer_ = new java.util.Timer("test-watchdog", true);
+
+        Watchdog(long timeout, TimeUnit unit) {
+            timer_.schedule(new java.util.TimerTask() {
+                @Override
+                public void run() {
+                    if (debugPrint()) {
+                        System.out.println("Watchdog: test exceeded " + timeout + " " + unit
+                                + " -- forcing window/browser close");
+                    }
+                    javax.swing.SwingUtilities.invokeLater(() -> {
+                        try {
+                            if (browser_ != null) terminateTest();
+                        } catch (Exception e) {
+                            e.printStackTrace();
+                        }
+                    });
+                }
+            }, unit.toMillis(timeout));
+        }
+
+        @Override
+        public void close() {
+            timer_.cancel();
+        }
+    }
+
+    // Block until the test completes, or up to 30 seconds, whichever comes
+    // first. A hung test fails cleanly instead of leaving a stuck window.
     public final void awaitCompletion() {
-        try {
-            countdown_.await();
+        awaitCompletion(30, TimeUnit.SECONDS);
+    }
+
+    public final void awaitCompletion(long timeout, TimeUnit unit) {
+        boolean completed;
+        try (Watchdog watchdog = new Watchdog(timeout, unit)) {
+            completed = countdown_.await(timeout, unit);
         } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            fail("Interrupted while awaiting test completion", e);
+            return;
         }
         if (debugPrint()) System.out.println("awaitCompletion returned");
+        if (!completed) {
+            fail("Test timed out after " + timeout + " " + unit
+                    + " without completing (window/browser force-closed by watchdog)");
+        }
     }
 
     protected void addResource(String url, String content, String mimeType) {
@@ -227,11 +275,16 @@ class TestFrame extends JFrame implements CefLifeSpanHandler, CefLoadHandler, Ce
         return false;
     }
 
+    // Subclasses that need CEF to fall through to a CefRequestContextHandler
+    // (which is only consulted when the browser's own CefRequestHandler
+    // returns null here) can set this before creating their browser.
+    protected boolean delegateToRequestContextHandler_ = false;
+
     @Override
     public CefResourceRequestHandler getResourceRequestHandler(CefBrowser browser, CefFrame frame,
             CefRequest request, boolean isNavigation, boolean isDownload, String requestInitiator,
             BoolRef disableDefaultHandling) {
-        return this;
+        return delegateToRequestContextHandler_ ? null : this;
     }
 
     @Override

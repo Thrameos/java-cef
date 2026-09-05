@@ -3,6 +3,7 @@
 // can be found in the LICENSE file.
 
 #include "print_handler.h"
+#include "jcef_trace.h"
 
 #include "jni_util.h"
 #include "util.h"
@@ -39,6 +40,7 @@ PrintHandler::PrintHandler(JNIEnv* env, jobject handler)
     : handle_(env, handler) {}
 
 void PrintHandler::OnPrintStart(CefRefPtr<CefBrowser> browser) {
+  JCEF_TRACE("PrintHandler::OnPrintStart() ENTER");
   ScopedJNIEnv env;
   if (!env)
     return;
@@ -52,6 +54,7 @@ void PrintHandler::OnPrintStart(CefRefPtr<CefBrowser> browser) {
 void PrintHandler::OnPrintSettings(CefRefPtr<CefBrowser> browser,
                                    CefRefPtr<CefPrintSettings> settings,
                                    bool get_defaults) {
+  JCEF_TRACE("PrintHandler::OnPrintSettings() ENTER");
   ScopedJNIEnv env;
   if (!env)
     return;
@@ -69,6 +72,7 @@ void PrintHandler::OnPrintSettings(CefRefPtr<CefBrowser> browser,
 bool PrintHandler::OnPrintDialog(CefRefPtr<CefBrowser> browser,
                                  bool has_selection,
                                  CefRefPtr<CefPrintDialogCallback> callback) {
+  JCEF_TRACE("PrintHandler::OnPrintDialog() ENTER");
   ScopedJNIEnv env;
   if (!env)
     return false;
@@ -97,6 +101,7 @@ bool PrintHandler::OnPrintJob(CefRefPtr<CefBrowser> browser,
                               const CefString& document_name,
                               const CefString& pdf_file_path,
                               CefRefPtr<CefPrintJobCallback> callback) {
+  JCEF_TRACE("PrintHandler::OnPrintJob() ENTER");
   ScopedJNIEnv env;
   if (!env)
     return false;
@@ -125,6 +130,7 @@ bool PrintHandler::OnPrintJob(CefRefPtr<CefBrowser> browser,
 }
 
 void PrintHandler::OnPrintReset(CefRefPtr<CefBrowser> browser) {
+  JCEF_TRACE("PrintHandler::OnPrintReset() ENTER");
   ScopedJNIEnv env;
   if (!env)
     return;
@@ -137,6 +143,7 @@ void PrintHandler::OnPrintReset(CefRefPtr<CefBrowser> browser) {
 
 CefSize PrintHandler::GetPdfPaperSize(CefRefPtr<CefBrowser> browser,
                                       int device_units_per_inch) {
+  JCEF_TRACE("PrintHandler::GetPdfPaperSize() ENTER");
   ScopedJNIEnv env;
   if (!env)
     return CefSize(0, 0);

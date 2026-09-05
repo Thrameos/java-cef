@@ -3,6 +3,7 @@
 // can be found in the LICENSE file.
 
 #include "download_handler.h"
+#include "jcef_trace.h"
 
 #include "jni_util.h"
 
@@ -54,6 +55,7 @@ bool DownloadHandler::OnBeforeDownload(
     CefRefPtr<CefDownloadItem> download_item,
     const CefString& suggested_name,
     CefRefPtr<CefBeforeDownloadCallback> callback) {
+  JCEF_TRACE("DownloadHandler::OnBeforeDownload() ENTER");
   ScopedJNIEnv env;
   if (!env)
     return false;
@@ -80,6 +82,7 @@ void DownloadHandler::OnDownloadUpdated(
     CefRefPtr<CefBrowser> browser,
     CefRefPtr<CefDownloadItem> download_item,
     CefRefPtr<CefDownloadItemCallback> callback) {
+  JCEF_TRACE("DownloadHandler::OnDownloadUpdated() ENTER");
   ScopedJNIEnv env;
   if (!env)
     return;

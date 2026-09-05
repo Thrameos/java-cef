@@ -30,7 +30,7 @@ JNIEXPORT void JNICALL
 Java_org_cef_network_CefPostDataElement_1N_N_1Dispose(JNIEnv* env,
                                                       jobject obj,
                                                       jlong self) {
-  SetCefForJNIObject<CefPostDataElement>(env, obj, nullptr, kCefClassName);
+  SetCefForJNIObject_sync<CefPostDataElement>(env, obj, nullptr, kCefClassName);
 }
 
 JNIEXPORT jboolean JNICALL
@@ -61,7 +61,13 @@ Java_org_cef_network_CefPostDataElement_1N_N_1SetToFile(JNIEnv* env,
   CefRefPtr<CefPostDataElement> dataElement = GetSelf(self);
   if (!dataElement)
     return;
-  dataElement->SetToFile(GetJNIString(env, jfilename));
+  // CEF's own CHECK(!fileName.empty()) aborts the Debug/coverage build
+  // (silently permitted in Release) on an empty file name. See
+  // Thrameos/java-cef#20/#21 and CefRequest_N.cpp's matching guard.
+  CefString fileName = GetJNIString(env, jfilename);
+  if (fileName.empty())
+    return;
+  dataElement->SetToFile(fileName);
 }
 
 JNIEXPORT void JNICALL
@@ -72,6 +78,14 @@ Java_org_cef_network_CefPostDataElement_1N_N_1SetToBytes(JNIEnv* env,
                                                          jbyteArray jbytes) {
   CefRefPtr<CefPostDataElement> dataElement = GetSelf(self);
   if (!dataElement)
+    return;
+
+  // |jsize| is a signed jint that gets passed straight into
+  // CefPostDataElement::SetToBytes()'s unsigned size_t parameter -- a
+  // negative value implicitly converts to a huge unsigned size, causing a
+  // buffer over-read/crash. Also reject a size larger than the actual array,
+  // which would read past the end of |jbytes|. See Thrameos/java-cef#19.
+  if (jsize < 0 || jsize > env->GetArrayLength(jbytes))
     return;
 
   jbyte* jbyte = env->GetByteArrayElements(jbytes, nullptr);

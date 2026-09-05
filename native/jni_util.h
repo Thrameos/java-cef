@@ -11,6 +11,8 @@
 #include "include/cef_browser.h"
 #include "include/cef_frame.h"
 #include "include/wrapper/cef_message_router.h"
+#include "context.h"
+#include "jcef_trace.h"
 #include "util.h"
 
 // Set the global JVM reference.
@@ -246,5 +248,26 @@ bool IsJNIEnumValue(JNIEnv* env,
   GetJNIBrowser(env, jbrowser);                       \
   if (!browser.get())                                 \
     return __VA_ARGS__;
+
+// Liveness guard against issue #10/#4/#23's family: several *_N.java
+// classes' finalize() methods call a semantic native method directly
+// (CefBrowser_N's close(true), a callback's cancel()/Continue(...), etc.)
+// rather than going through the single choke point
+// SetCefForJNIObjectHelper::Release() already guards (see
+// jni_scoped_helpers.h) -- these need their own guard at each such native
+// entry point. Java finalizers run on the JVM's own Finalizer thread with
+// no ordering guarantee relative to CefApp.dispose()/CefShutdown();
+// touching CEF after Context::GetInstance() has gone null (Context::
+// Destroy() already ran) is confirmed unsafe via
+// tools_native/issue10_repro's ISSUE10_REPRO_LATE_CLOSE mode. Use at the
+// top of any native _N.cpp function reachable from one of these finalize()
+// methods, before any other work.
+#define JNI_REQUIRE_CEF_ALIVE_OR_RETURN(...)                        \
+  if (!Context::GetInstance()) {                                    \
+    JCEF_TRACE("%s EXIT early -- CEF already shut down "            \
+               "(Context::GetInstance() == null)",                  \
+               __func__);                                           \
+    return __VA_ARGS__;                                             \
+  }
 
 #endif  // JCEF_NATIVE_JNI_UTIL_H_

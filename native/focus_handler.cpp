@@ -3,6 +3,7 @@
 // can be found in the LICENSE file.
 
 #include "focus_handler.h"
+#include "jcef_trace.h"
 
 #include "include/base/cef_callback.h"
 #include "include/wrapper/cef_closure_task.h"
@@ -14,6 +15,7 @@ FocusHandler::FocusHandler(JNIEnv* env, jobject handler)
     : handle_(env, handler) {}
 
 void FocusHandler::OnTakeFocus(CefRefPtr<CefBrowser> browser, bool next) {
+  JCEF_TRACE("FocusHandler::OnTakeFocus() ENTER");
   ScopedJNIEnv env;
   if (!env)
     return;
@@ -26,6 +28,7 @@ void FocusHandler::OnTakeFocus(CefRefPtr<CefBrowser> browser, bool next) {
 
 bool FocusHandler::OnSetFocus(CefRefPtr<CefBrowser> browser,
                               FocusSource source) {
+  JCEF_TRACE("FocusHandler::OnSetFocus() ENTER");
   ScopedJNIEnv env;
   if (!env)
     return false;
@@ -49,6 +52,7 @@ bool FocusHandler::OnSetFocus(CefRefPtr<CefBrowser> browser,
 }
 
 void FocusHandler::OnGotFocus(CefRefPtr<CefBrowser> browser) {
+  JCEF_TRACE("FocusHandler::OnGotFocus() ENTER");
   ScopedJNIEnv env;
   if (!env)
     return;

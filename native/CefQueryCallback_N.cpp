@@ -17,7 +17,7 @@ CefRefPtr<CefQueryCallback> GetSelf(jlong self) {
 
 void ClearSelf(JNIEnv* env, jobject obj) {
   // Clear the reference added in ClientHandler::OnQuery.
-  SetCefForJNIObject<CefQueryCallback>(env, obj, nullptr, "CefQueryCallback");
+  SetCefForJNIObject_sync<CefQueryCallback>(env, obj, nullptr, "CefQueryCallback");
 }
 
 }  // namespace
@@ -26,12 +26,17 @@ JNIEXPORT void JNICALL
 Java_org_cef_callback_CefQueryCallback_1N_N_1Success(JNIEnv* env,
                                                      jobject obj,
                                                      jlong self,
-                                                     jstring response) {
+                                                     jstring response,
+                                                     jboolean persistent) {
   CefRefPtr<CefQueryCallback> callback = GetSelf(self);
   if (!callback)
     return;
   callback->Success(GetJNIString(env, response));
-  ClearSelf(env, obj);
+  // A persistent query's callback may be used repeatedly -- only release the
+  // native reference once the query is done (see N_Failure, which always
+  // ends the query). See Thrameos/java-cef#13.
+  if (!persistent)
+    ClearSelf(env, obj);
 }
 
 JNIEXPORT void JNICALL
@@ -40,6 +45,9 @@ Java_org_cef_callback_CefQueryCallback_1N_N_1Failure(JNIEnv* env,
                                                      jlong self,
                                                      jint error_code,
                                                      jstring error_message) {
+  // See jni_util.h's JNI_REQUIRE_CEF_ALIVE_OR_RETURN comment -- reachable
+  // from CefQueryCallback_N.java's finalize().
+  JNI_REQUIRE_CEF_ALIVE_OR_RETURN();
   CefRefPtr<CefQueryCallback> callback = GetSelf(self);
   if (!callback)
     return;

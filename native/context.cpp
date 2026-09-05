@@ -7,6 +7,8 @@
 #include "include/cef_app.h"
 
 #include "client_app.h"
+#include "jcef_trace.h"
+#include "jni_scoped_helpers.h"
 #include "jni_util.h"
 
 #if defined(OS_MACOSX)
@@ -139,14 +141,17 @@ CefSettings GetJNISettings(JNIEnv* env, jobject obj) {
 
 // static
 void Context::Create() {
+  JCEF_TRACE("Context::Create() static");
   new Context();
 }
 
 // static
 void Context::Destroy() {
+  JCEF_TRACE("Context::Destroy() static ENTER");
   DCHECK(g_context);
   if (g_context)
     delete g_context;
+  JCEF_TRACE("Context::Destroy() static EXIT");
 }
 
 // static
@@ -155,6 +160,7 @@ Context* Context::GetInstance() {
 }
 
 bool Context::PreInitialize(JNIEnv* env, jobject c) {
+  JCEF_TRACE("PreInitialize() ENTER");
   DCHECK(thread_checker_.CalledOnValidThread());
 
   JavaVM* jvm;
@@ -173,6 +179,7 @@ bool Context::PreInitialize(JNIEnv* env, jobject c) {
     return false;
   SetJavaClassLoader(env, javaClassLoader);
 
+  JCEF_TRACE("PreInitialize() EXIT ok");
   return true;
 }
 
@@ -180,6 +187,7 @@ bool Context::Initialize(JNIEnv* env,
                          jobject c,
                          jobject appHandler,
                          jobject jsettings) {
+  JCEF_TRACE("Initialize() ENTER");
   DCHECK(thread_checker_.CalledOnValidThread());
 
 #if defined(OS_WIN)
@@ -226,6 +234,8 @@ bool Context::Initialize(JNIEnv* env,
   // DoMessageLoopWork.
   settings.external_message_pump = external_message_pump_;
 
+  JCEF_TRACE("Initialize() calling CefInitialize(), external_message_pump_=%d",
+            external_message_pump_ ? 1 : 0);
   CefRefPtr<ClientApp> client_app(
       new ClientApp(CefString(&settings.cache_path), env, appHandler));
   bool res = false;
@@ -237,16 +247,25 @@ bool Context::Initialize(JNIEnv* env,
   res = CefInitialize(main_args, settings, client_app.get(), nullptr);
 #endif
 
+  JCEF_TRACE("Initialize() EXIT res=%d", res ? 1 : 0);
   return res;
 }
 
 void Context::OnContextInitialized() {
+  JCEF_TRACE("OnContextInitialized() ENTER");
   REQUIRE_UI_THREAD();
   temp_window_.reset(new TempWindow());
+  JCEF_TRACE("OnContextInitialized() EXIT");
 }
 
 void Context::DoMessageLoopWork() {
   DCHECK(thread_checker_.CalledOnValidThread());
+
+  static long long call_count = 0;
+  ++call_count;
+  if (call_count <= 5 || call_count % 100 == 0) {
+    JCEF_TRACE("DoMessageLoopWork() call #%lld", call_count);
+  }
 
 #if defined(OS_MACOSX)
   util_mac::CefDoMessageLoopWorkOnMainThread();
@@ -256,7 +275,21 @@ void Context::DoMessageLoopWork() {
 }
 
 void Context::Shutdown() {
+  JCEF_TRACE("Shutdown() ENTER");
   DCHECK(thread_checker_.CalledOnValidThread());
+
+  // Make Shutdown() idempotent: guard against being invoked more than once
+  // (e.g. a race between two paths that each believe they're the last
+  // client/browser being disposed -- see CefApp.java's shutdown(), which is
+  // scheduled via SwingUtilities.invokeLater() and so is not atomic with
+  // the state check that triggers it). A second CefShutdown() call is not
+  // safe to make. See Thrameos/java-cef#22/#23.
+  static bool shutdown_called = false;
+  if (shutdown_called) {
+    JCEF_TRACE("Shutdown() EXIT early -- already called once");
+    return;
+  }
+  shutdown_called = true;
 
   // Clear scheme handler factories on shutdown to avoid refcount DCHECK.
   CefClearSchemeHandlerFactories();
@@ -266,6 +299,27 @@ void Context::Shutdown() {
   util_mac::CefShutdownOnMainThread();
 #else
   // Pump CefDoMessageLoopWork a few times before shutting down.
+  //
+  // RULED OUT (2026-08-30, root-causing issue #4/#23's all_.empty() DCHECK):
+  // hypothesized this fixed, undelayed 10-iteration burst might not give
+  // async browser-context teardown enough real wall-clock time to finish
+  // before CefShutdown() tears down process-wide statics (ImplManager's all_
+  // vector). Tested directly with JCEF_TRACE instrumentation: a 200-iteration,
+  // 5ms-delayed pump (~1s total, 100x the original budget) ran to full,
+  // logged completion, and CefShutdown() still crashed on the very next line
+  // with the identical DCHECK. Pump budget is not the cause -- reverted to
+  // the original 10x. The crash happens inside CefShutdown() itself; the
+  // leading suspect now is a JVM-vs-CEF child-process-reaping race (a
+  // `waitpid(PID): No child processes` ECHILD line from CEF's own
+  // base/process/kill_posix.cc immediately precedes this specific DCHECK in
+  // every captured repro, but not the other unrelated crash signatures seen
+  // this session) -- not yet confirmed. See plan/findings.md.
+  // GH #10 derisking probe (2026-09-03, not yet acted on): log JCEF's own
+  // live-CEF-object count at both ends of this pump -- see the "GH #10:
+  // phased/quiescent shutdown" plan and SetCefForJNIObjectHelper's own
+  // comment. Purely observational; no behavior change here.
+  JCEF_TRACE("Shutdown() live_object_count=%d before pump",
+            SetCefForJNIObjectHelper::GetLiveObjectCount());
   if (external_message_pump_) {
     for (int i = 0; i < 10; ++i)
       CefDoMessageLoopWork();
@@ -273,11 +327,16 @@ void Context::Shutdown() {
 
   temp_window_.reset(nullptr);
 
+  JCEF_TRACE("Shutdown() live_object_count=%d before CefShutdown()",
+            SetCefForJNIObjectHelper::GetLiveObjectCount());
+  JCEF_TRACE("Shutdown() calling CefShutdown()...");
   CefShutdown();
+  JCEF_TRACE("Shutdown() CefShutdown() returned");
 #endif
 }
 
 Context::Context() : external_message_pump_(true) {
+  JCEF_TRACE("Context::Context() (constructor)");
   DCHECK(!g_context);
   g_context = this;
 
@@ -290,10 +349,12 @@ Context::Context() : external_message_pump_(true) {
 }
 
 Context::~Context() {
+  JCEF_TRACE("Context::~Context() (destructor) ENTER");
   DCHECK(thread_checker_.CalledOnValidThread());
   g_context = nullptr;
 
 #if defined(OS_MACOSX)
   cef_unload_library();
 #endif
+  JCEF_TRACE("Context::~Context() (destructor) EXIT");
 }

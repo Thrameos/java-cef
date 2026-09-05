@@ -119,16 +119,66 @@ set(CMAKE_CONFIGURATION_TYPES Debug Release)
 # Project name.
 project(jcef)
 
-# Enable gcov/gcovr coverage instrumentation for the jcef target (native/*.cpp only,
-# not the vendored libcef_dll_wrapper). Linux/GCC-Clang only for now -- MSVC needs a
-# different toolchain (e.g. OpenCppCoverage) not wired up here.
-option(ENABLE_COVERAGE "Enable compilation for coverage measurement" OFF)
-if(ENABLE_COVERAGE AND NOT CMAKE_SYSTEM_NAME STREQUAL "Windows")
+# Clang source-based coverage (-fprofile-instr-generate/-fcoverage-mapping) for the
+# jcef target (native/*.cpp only, not the vendored libcef_dll_wrapper). Linux/
+# GCC-Clang only for now -- MSVC needs a different toolchain (e.g. OpenCppCoverage)
+# not wired up here. gcov-style instrumentation was considered and rejected: its
+# .gcda writer is not multi-process-safe -- CEF's zygote-style fork() (child
+# processes that briefly share the parent's already-loaded, already-instrumented
+# libjcef.so before specializing) let a child's own atexit-triggered gcov dump
+# silently overwrite the parent's real counters with near-zero data (see
+# plan/findings.md's 2026-08-30 "coverage partial writer" investigation for the
+# live repro/evidence). Clang's source-based coverage avoids this by design: each
+# process gets its own raw profile file (LLVM_PROFILE_FILE's %p pattern embeds the
+# PID), merged afterward with llvm-profdata -- the same fix Chromium itself uses
+# for its own coverage builds, per docs/code_coverage.md. Requires clang/clang++
+# (CMAKE_C_COMPILER/CMAKE_CXX_COMPILER) instead of gcc.
+# NOTE: needs clang-18 or newer. clang-14 and clang-15 (checked directly, 2026-08-30) both
+# fail to parse this CEF version's own base/internal/cef_bind_internal.h -- a real C++20
+# parser limitation in those versions (a `template`-disambiguated dependent alias-template
+# member access construct GCC accepts fine), fixed by clang-18. If your distro's newest
+# packaged clang is too old, fetch a clang-18+ release directly from
+# https://github.com/llvm/llvm-project/releases (self-contained tarball, no root needed).
+option(ENABLE_LLVM_COVERAGE "Enable Clang source-based coverage instrumentation for the jcef target" OFF)
+if(ENABLE_LLVM_COVERAGE AND NOT CMAKE_SYSTEM_NAME STREQUAL "Windows")
   if(NOT CMAKE_BUILD_TYPE STREQUAL "Debug")
-    message(WARNING "ENABLE_COVERAGE set -- forcing Debug build for coverage correctness")
+    message(WARNING "ENABLE_LLVM_COVERAGE set -- forcing Debug build for coverage correctness")
+    set(CMAKE_BUILD_TYPE "Debug" CACHE STRING "" FORCE)
+  endif()
+  if(NOT CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
+    message(FATAL_ERROR "ENABLE_LLVM_COVERAGE requires clang-18+: pass -DCMAKE_C_COMPILER=<path to clang> -DCMAKE_CXX_COMPILER=<path to clang++> at configure time -- see the comment above this option if your distro's clang is older than 18")
+  endif()
+endif()
+
+# AddressSanitizer instrumentation for the jcef target (native/*.cpp only, not the
+# vendored libcef_dll_wrapper/libcef.so -- those aren't built with ASan, so this can
+# only catch bad memory accesses that originate in this repo's own native/ code, not
+# inside CEF itself). Linux/GCC-Clang only; not supported on Windows here. Meant as
+# a one-off debugging build (run a small, targeted repro under it), not for routine
+# use -- ASan roughly doubles memory use and slows execution noticeably, and its
+# runtime (libasan) generally needs to be first in the process via LD_PRELOAD.
+option(ENABLE_ASAN "Enable AddressSanitizer instrumentation for the jcef target" OFF)
+if(ENABLE_ASAN AND NOT CMAKE_SYSTEM_NAME STREQUAL "Windows")
+  if(NOT CMAKE_BUILD_TYPE STREQUAL "Debug")
+    message(WARNING "ENABLE_ASAN set -- forcing Debug build")
     set(CMAKE_BUILD_TYPE "Debug" CACHE STRING "" FORCE)
   endif()
 endif()
+
+# Permanent lightweight tracing facility (native/jcef_trace.h) for instrumenting
+# native lifecycle/teardown paths without hand-adding and later removing fprintf
+# calls each time -- see plan/findings.md's root-cause investigation of issue
+# #4/#23. Compiled to a true no-op when off; even when on, each JCEF_TRACE() call
+# is gated by a cheap runtime check of the JCEF_TRACE env var, so leaving this ON
+# in Debug/coverage builds costs nothing unless a session actually sets that var.
+option(JCEF_ENABLE_TRACE "Compile in the JCEF_TRACE() native instrumentation macro (see native/jcef_trace.h); still silent at runtime unless the JCEF_TRACE env var is set" OFF)
+
+# Builds tools_native/leak_probe and tools_native/jni_noop_probe, two
+# standalone diagnostic binaries used only by the leak-checker test harness
+# (java/tests/junittests/LeakSweepTest.java, tag "leak-sweep" -- excluded
+# from normal CI runs). Off by default so a routine `cmake .. && ninja jcef`
+# doesn't pay the build cost for tooling most consumers will never run.
+option(ENABLE_LEAK_CHECKER "Build the leak-checker diagnostic probes (tools_native/)" OFF)
 
 # Use folders in the resulting project files.
 set_property(GLOBAL PROPERTY OS_FOLDERS ON)
@@ -303,7 +353,9 @@ execute_process(
   RESULT_VARIABLE EXECUTE_RV
   )
 if(NOT EXECUTE_RV STREQUAL "0")
-  message(FATAL_ERROR "Execution failed with unexpected result: ${EXECUTE_RV}")
+  message(WARNING "clang-format download failed (result: ${EXECUTE_RV}); "
+                   "tools/fix_style.sh won't have clang-format available, "
+                   "but this doesn't block the actual jcef/jcef_helper build.")
 endif()
 
 

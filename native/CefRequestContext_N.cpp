@@ -4,13 +4,18 @@
 
 #include "CefRequestContext_N.h"
 #include "include/cef_request_context.h"
+#include "jcef_ref_ptr.h"
 #include "jni_util.h"
 #include "request_context_handler.h"
 
 JNIEXPORT jobject JNICALL
 Java_org_cef_browser_CefRequestContext_1N_N_1GetGlobalContext(JNIEnv* env,
                                                               jclass cls) {
-  CefRefPtr<CefRequestContext> context = CefRequestContext::GetGlobalContext();
+  // Traced (JCefRefPtr, not plain CefRefPtr) -- this is the exact object at
+  // the center of #4/#23's mechanism-1 fix (CefRequestContext_N.java's
+  // getGlobalContextNative() cache) and a plausible site for mechanism 2
+  // too. See native/jcef_ref_ptr.h / issue_4_23_mental_model memory.
+  JCefRefPtr<CefRequestContext> context = CefRequestContext::GetGlobalContext();
   if (!context.get())
     return nullptr;
 
@@ -18,7 +23,7 @@ Java_org_cef_browser_CefRequestContext_1N_N_1GetGlobalContext(JNIEnv* env,
   if (!jContext)
     return nullptr;
 
-  SetCefForJNIObject(env, jContext, context.get(), "CefRequestContext");
+  SetCefForJNIObject_sync(env, jContext, context.get(), "CefRequestContext");
   return jContext.Release();
 }
 
@@ -42,7 +47,7 @@ Java_org_cef_browser_CefRequestContext_1N_N_1CreateContext(JNIEnv* env,
   if (!jContext)
     return nullptr;
 
-  SetCefForJNIObject(env, jContext, context.get(), "CefRequestContext");
+  SetCefForJNIObject_sync(env, jContext, context.get(), "CefRequestContext");
   return jContext.Release();
 }
 
@@ -50,7 +55,7 @@ JNIEXPORT jboolean JNICALL
 Java_org_cef_browser_CefRequestContext_1N_N_1IsGlobal(JNIEnv* env,
                                                       jobject obj) {
   CefRefPtr<CefRequestContext> context =
-      GetCefFromJNIObject<CefRequestContext>(env, obj, "CefRequestContext");
+      GetCefFromJNIObject_sync<CefRequestContext>(env, obj, "CefRequestContext");
   if (!context.get())
     return JNI_FALSE;
   return context->IsGlobal() ? JNI_TRUE : JNI_FALSE;
@@ -61,7 +66,7 @@ Java_org_cef_browser_CefRequestContext_1N_N_1HasPreference(JNIEnv* env,
                                                            jobject obj,
                                                            jstring jname) {
   CefRefPtr<CefRequestContext> context =
-      GetCefFromJNIObject<CefRequestContext>(env, obj, "CefRequestContext");
+      GetCefFromJNIObject_sync<CefRequestContext>(env, obj, "CefRequestContext");
   if (!context.get())
     return JNI_FALSE;
 
@@ -74,7 +79,7 @@ Java_org_cef_browser_CefRequestContext_1N_N_1GetPreference(JNIEnv* env,
                                                            jobject obj,
                                                            jstring jname) {
   CefRefPtr<CefRequestContext> context =
-      GetCefFromJNIObject<CefRequestContext>(env, obj, "CefRequestContext");
+      GetCefFromJNIObject_sync<CefRequestContext>(env, obj, "CefRequestContext");
   if (!context.get())
     return nullptr;
 
@@ -92,7 +97,7 @@ Java_org_cef_browser_CefRequestContext_1N_N_1GetAllPreferences(
     jobject obj,
     jboolean includeDefaults) {
   CefRefPtr<CefRequestContext> context =
-      GetCefFromJNIObject<CefRequestContext>(env, obj, "CefRequestContext");
+      GetCefFromJNIObject_sync<CefRequestContext>(env, obj, "CefRequestContext");
   if (!context.get())
     return nullptr;
 
@@ -120,7 +125,7 @@ Java_org_cef_browser_CefRequestContext_1N_N_1CanSetPreference(JNIEnv* env,
                                                               jobject obj,
                                                               jstring jname) {
   CefRefPtr<CefRequestContext> context =
-      GetCefFromJNIObject<CefRequestContext>(env, obj, "CefRequestContext");
+      GetCefFromJNIObject_sync<CefRequestContext>(env, obj, "CefRequestContext");
   if (!context.get())
     return JNI_FALSE;
 
@@ -137,7 +142,7 @@ Java_org_cef_browser_CefRequestContext_1N_N_1SetPreference(JNIEnv* env,
     return NewJNIString(env, "called on invalid thread");
 
   CefRefPtr<CefRequestContext> context =
-      GetCefFromJNIObject<CefRequestContext>(env, obj, "CefRequestContext");
+      GetCefFromJNIObject_sync<CefRequestContext>(env, obj, "CefRequestContext");
   if (!context.get())
     return NewJNIString(env, "no request context");
 
@@ -158,5 +163,5 @@ JNIEXPORT void JNICALL
 Java_org_cef_browser_CefRequestContext_1N_N_1CefRequestContext_1DTOR(
     JNIEnv* env,
     jobject obj) {
-  SetCefForJNIObject<CefRequestContext>(env, obj, nullptr, "CefRequestContext");
+  SetCefForJNIObject_sync<CefRequestContext>(env, obj, nullptr, "CefRequestContext");
 }

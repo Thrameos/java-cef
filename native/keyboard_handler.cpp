@@ -3,6 +3,7 @@
 // can be found in the LICENSE file.
 
 #include "keyboard_handler.h"
+#include "jcef_trace.h"
 
 #include "client_handler.h"
 #include "jni_util.h"
@@ -42,6 +43,7 @@ bool KeyboardHandler::OnPreKeyEvent(CefRefPtr<CefBrowser> browser,
                                     const CefKeyEvent& event,
                                     CefEventHandle os_event,
                                     bool* is_keyboard_shortcut) {
+  JCEF_TRACE("KeyboardHandler::OnPreKeyEvent() ENTER");
   ScopedJNIEnv env;
   if (!env)
     return false;
@@ -69,6 +71,7 @@ bool KeyboardHandler::OnPreKeyEvent(CefRefPtr<CefBrowser> browser,
 bool KeyboardHandler::OnKeyEvent(CefRefPtr<CefBrowser> browser,
                                  const CefKeyEvent& event,
                                  CefEventHandle os_event) {
+  JCEF_TRACE("KeyboardHandler::OnKeyEvent() ENTER");
   ScopedJNIEnv env;
   if (!env)
     return false;
