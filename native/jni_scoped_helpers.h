@@ -8,6 +8,7 @@
 #include <jni.h>
 
 #include <string>
+#include <type_traits>
 
 #include "include/cef_auth_callback.h"
 #include "include/cef_browser.h"
@@ -447,6 +448,10 @@ template <class T>
 bool SetCefForJNIObject(JNIEnv* env, jobject obj, T* base, const char* varName);
 template <class T>
 T* GetCefFromJNIObject(JNIEnv* env, jobject obj, const char* varName);
+template <class T>
+bool SetCefForJNIObject_sync(JNIEnv* env, jobject obj, T* base, const char* varName);
+template <class T>
+CefRefPtr<T> GetCefFromJNIObject_sync(JNIEnv* env, jobject obj, const char* varName);
 
 class ScopedJNIEnv {
  public:
@@ -612,8 +617,7 @@ class ScopedJNIObject : public ScopedJNIBase<jobject> {
       jhandle_ = NewJNIObject(env_, jni_class_name);
       if (jhandle_) {
         created_handle_ = true;
-        SetCefForJNIObject(env_, jhandle_, SetCefForJNIObjectHelper::Get(obj),
-                           cef_class_name);
+        SetCefForJNIObjectImpl(SetCefForJNIObjectHelper::Get(obj), cef_class_name);
       }
     }
   }
@@ -621,7 +625,7 @@ class ScopedJNIObject : public ScopedJNIBase<jobject> {
   virtual ~ScopedJNIObject() {
     if (temporary_ && created_handle_) {
       // Invalidate the Java object.
-      SetCefForJNIObject<T>(env_, jhandle_, nullptr, cef_class_name_);
+      SetCefForJNIObjectImpl(nullptr, cef_class_name_);
     }
   }
 
@@ -645,7 +649,7 @@ class ScopedJNIObject : public ScopedJNIBase<jobject> {
     if (object_)
       return object_;
     if (jhandle_)
-      object_ = GetCefFromJNIObject<T>(env_, jhandle_, cef_class_name_);
+      object_ = GetCefFromJNIObjectImpl();
     return object_;
   }
 
@@ -654,8 +658,7 @@ class ScopedJNIObject : public ScopedJNIBase<jobject> {
     PtrT object = GetCefObject();
     if (!object && jhandle_) {
       object = new T(env_, jhandle_);
-      SetCefForJNIObject(env_, jhandle_, SetCefForJNIObjectHelper::Get(object),
-                         cef_class_name_);
+      SetCefForJNIObjectImpl(SetCefForJNIObjectHelper::Get(object), cef_class_name_);
       object_ = object;
     }
     return object;
@@ -666,6 +669,33 @@ class ScopedJNIObject : public ScopedJNIBase<jobject> {
   const char* const cef_class_name_;
   bool temporary_;
   bool created_handle_;
+
+ private:
+  // PtrT is CefRefPtr<T> for every instantiation except CefSchemeRegistrar
+  // (which uses CefRawPtr<T> -- a CefBaseScoped type with no AddRef/Release,
+  // incompatible with GetCefFromJNIObject_sync()'s CefRefPtr<T> return type).
+  // Route the CefRefPtr<T> case through the lock-protected _sync accessors
+  // so this class's own create-on-first-use path can't race against a
+  // concurrent (possibly reentrant, same-thread) _sync dispose elsewhere --
+  // see Thrameos/java-cef#22: mixing locked and unlocked accessors on the
+  // same underlying native-ref field gives neither side any protection.
+  static constexpr bool kUseSyncAccessors = std::is_same<PtrT, CefRefPtr<T>>::value;
+
+  PtrT GetCefFromJNIObjectImpl() {
+    if constexpr (kUseSyncAccessors) {
+      return GetCefFromJNIObject_sync<T>(env_, jhandle_, cef_class_name_);
+    } else {
+      return GetCefFromJNIObject<T>(env_, jhandle_, cef_class_name_);
+    }
+  }
+
+  void SetCefForJNIObjectImpl(T* base, const char* varName) {
+    if constexpr (kUseSyncAccessors) {
+      SetCefForJNIObject_sync(env_, jhandle_, base, varName);
+    } else {
+      SetCefForJNIObject(env_, jhandle_, base, varName);
+    }
+  }
 };
 
 // JNI class. Finding |class_name| may fail.
