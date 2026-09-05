@@ -28,6 +28,9 @@ Java_org_cef_callback_CefBeforeDownloadCallback_1N_N_1Continue(
     jlong self,
     jstring jdownloadPath,
     jboolean jshowDialog) {
+  // See jni_util.h's JNI_REQUIRE_CEF_ALIVE_OR_RETURN comment -- reachable
+  // from CefBeforeDownloadCallback_N.java's finalize().
+  JNI_REQUIRE_CEF_ALIVE_OR_RETURN();
   CefRefPtr<CefBeforeDownloadCallback> callback = GetSelf(self);
   if (!callback)
     return;

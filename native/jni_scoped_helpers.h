@@ -21,6 +21,8 @@
 #include "include/cef_response.h"
 #include "include/wrapper/cef_message_router.h"
 
+#include "context.h"
+
 //
 // --------
 // OVERVIEW
@@ -424,7 +426,25 @@ struct SetCefForJNIObjectHelper {
   }
 
   static inline void AddRef(CefBaseRefCounted* obj) { obj->AddRef(); }
-  static inline void Release(CefBaseRefCounted* obj) { obj->Release(); }
+  static inline void Release(CefBaseRefCounted* obj) {
+    // Liveness guard against issue #10/#4/#23's family: this is the single
+    // point every simple value-object *_N.java class's finalize()/dispose()
+    // funnels through (via SetCefForJNIObject_sync -> here). Java finalizers
+    // run on the JVM's own Finalizer thread with no ordering guarantee
+    // relative to CefApp.dispose()/CefShutdown() -- confirmed via
+    // tools_native/issue10_repro's ISSUE10_REPRO_LATE_CLOSE mode that
+    // touching CEF's ref-counting machinery after CefShutdown() has already
+    // torn down its allocator/global state is a real, reproducible trigger
+    // for corruption. Once CEF is fully shut down (Context::GetInstance()
+    // null, matching the same check CefApp.cpp's N_DoMessageLoopWork
+    // already uses), skip the Release() -- this "leaks" the object, but
+    // only in a process that's already tearing itself down, which is
+    // strictly safer than touching torn-down CEF state.
+    if (!Context::GetInstance()) {
+      return;
+    }
+    obj->Release();
+  }
 
   template <class T>
   static inline T* Get(CefRefPtr<T> obj) {

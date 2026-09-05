@@ -5,6 +5,7 @@
 #include "CefCallback_N.h"
 #include "include/cef_callback.h"
 #include "jni_scoped_helpers.h"
+#include "jni_util.h"
 
 namespace {
 
@@ -34,6 +35,9 @@ JNIEXPORT void JNICALL
 Java_org_cef_callback_CefCallback_1N_N_1Cancel(JNIEnv* env,
                                                jobject obj,
                                                jlong self) {
+  // See jni_util.h's JNI_REQUIRE_CEF_ALIVE_OR_RETURN comment -- reachable
+  // from CefCallback_N.java's finalize().
+  JNI_REQUIRE_CEF_ALIVE_OR_RETURN();
   CefRefPtr<CefCallback> callback = GetSelf(self);
   if (!callback)
     return;
