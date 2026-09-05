@@ -10,10 +10,15 @@ import org.cef.misc.StringRef;
 
 import java.util.HashMap;
 import java.util.Map;
+import java.util.concurrent.locks.Lock;
+import java.util.concurrent.locks.ReentrantLock;
 
 class CefRequestContext_N extends CefRequestContext implements CefNative {
-    // Used internally to store a pointer to the CEF object.
-    private long N_CefHandle = 0;
+    // Used internally to store a pointer to the CEF object. volatile + the
+    // lock below for the same reason as CefNativeAdapter.N_CefHandle -- see
+    // Thrameos/java-cef#22/#23.
+    private volatile long N_CefHandle = 0;
+    private final Lock lock_ = new ReentrantLock();
     private static CefRequestContext_N globalInstance = null;
     private CefRequestContextHandler handler = null;
 
@@ -25,6 +30,17 @@ class CefRequestContext_N extends CefRequestContext implements CefNative {
     @Override
     public long getNativeRef(String identifer) {
         return N_CefHandle;
+    }
+
+    // See CefNativeAdapter's lockAndGetNativeRef()/unlock() for the full
+    // rationale -- Thrameos/java-cef#22/#23.
+    long lockAndGetNativeRef(String identifer) {
+        lock_.lock();
+        return N_CefHandle;
+    }
+
+    void unlock(String identifer) {
+        lock_.unlock();
     }
 
     CefRequestContext_N() {
