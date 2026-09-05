@@ -509,6 +509,25 @@ public class CefApp extends CefAppHandlerAdapter implements Disposable {
                 CefRequestContext.disposeGlobalContext();
                 CefCookieManager.disposeGlobalManager();
 
+                // Cancel any pending message-pump Timer tick before it can
+                // fire after native shutdown below. Belt-and-suspenders
+                // alongside doMessageLoopWork()'s own TERMINATED check (see
+                // that method's comment for the full race this guards
+                // against) -- stopping it here closes the window even
+                // earlier, before N_Shutdown() runs at all.
+                if (workTimer_ != null) {
+                    workTimer_.stop();
+                    workTimer_ = null;
+                }
+
+                // Release the persistent native reference to the global request
+                // context before shutting down CEF -- otherwise it remains
+                // registered in CEF's internal browser-context tracking past
+                // CefShutdown(), tripping a DCHECK during final process teardown.
+                // See Thrameos/java-cef#23.
+                CefRequestContext.disposeGlobalContext();
+                CefCookieManager.disposeGlobalManager();
+
                 // Shutdown native CEF.
                 LOGGER.fine("CefApp.shutdown() N_Shutdown() CALL");
                 N_Shutdown();

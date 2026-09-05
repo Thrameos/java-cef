@@ -182,13 +182,13 @@ set(JCEF_SRCS_WINDOWS
   temp_window_win.h
   util_win.cpp
   )
-# Coverage-only test helper (see java-cef#4 / plan/findings.md): forces gcov to
-# flush its data before the known Debug-build shutdown crash, so CI can still
-# collect real coverage numbers for everything that ran before that point. Not
-# part of normal builds at all -- only added to the target when ENABLE_COVERAGE is
-# on, so it can't affect non-coverage builds (no dead code path, no link-time
-# dependency on __gcov_dump when the target isn't compiled with --coverage).
-if(ENABLE_COVERAGE OR ENABLE_LLVM_COVERAGE)
+# Coverage-only test helper (see java-cef#4 / plan/findings.md): forces the LLVM
+# profile writer to flush its data before the known Debug-build shutdown crash,
+# so CI can still collect real coverage numbers for everything that ran before
+# that point. Not part of normal builds at all -- only added to the target when
+# ENABLE_LLVM_COVERAGE is on, so it can't affect non-coverage builds (no dead
+# code path, no link-time dependency on __llvm_profile_write_file otherwise).
+if(ENABLE_LLVM_COVERAGE)
   list(APPEND JCEF_SRCS CoverageTestHelper.cpp)
 endif()
 
@@ -253,34 +253,39 @@ if(OS_LINUX)
   set_target_properties(${JCEF_HELPER_TARGET} PROPERTIES INSTALL_RPATH "$ORIGIN")
   set_target_properties(${JCEF_HELPER_TARGET} PROPERTIES BUILD_WITH_INSTALL_RPATH TRUE)
 
-  # Standalone diagnostic, not part of the JCEF product -- lives under
-  # tools_native/ (not native/) so it's never mistaken for shipped source;
-  # see tools_native/leak_probe/leak_probe.cc's own comment and
-  # plan/LeakCheckerPort.md's 2026-08-30 status. The two-argument form
-  # points at an out-of-tree source directory while still nesting its
-  # build output under this directory's own binary dir, inheriting
-  # CEF_TARGET_OUT_DIR/libcef_lib/libcef_dll_wrapper from this scope.
-  add_subdirectory(${CMAKE_SOURCE_DIR}/tools_native/leak_probe
-                    ${CMAKE_CURRENT_BINARY_DIR}/leak_probe)
+  # Standalone diagnostics, not part of the JCEF product -- live under
+  # tools_native/ (not native/) so they're never mistaken for shipped
+  # source; see tools_native/leak_probe/leak_probe.cc's own comment and
+  # plan/LeakCheckerPort.md's 2026-08-30 status. Gated behind
+  # ENABLE_LEAK_CHECKER (see CMakeLists.txt) so a routine build doesn't pay
+  # for tooling most consumers will never run. The two-argument
+  # add_subdirectory() form points at an out-of-tree source directory while
+  # still nesting build output under this directory's own binary dir,
+  # inheriting CEF_TARGET_OUT_DIR/libcef_lib/libcef_dll_wrapper from this
+  # scope.
+  if(ENABLE_LEAK_CHECKER)
+    add_subdirectory(${CMAKE_SOURCE_DIR}/tools_native/leak_probe
+                      ${CMAKE_CURRENT_BINARY_DIR}/leak_probe)
 
-  # Same reasoning as leak_probe above -- see
-  # tools_native/null_param_repro/null_param_repro.cc's own comment
-  # (minimum pure-C++ repro for issues #19/#20/#21's systemic
-  # null-to-empty-CefString CHECK() class of bug).
-  add_subdirectory(${CMAKE_SOURCE_DIR}/tools_native/null_param_repro
-                    ${CMAKE_CURRENT_BINARY_DIR}/null_param_repro)
+    # Same reasoning as leak_probe above -- see
+    # tools_native/null_param_repro/null_param_repro.cc's own comment
+    # (minimum pure-C++ repro for issues #19/#20/#21's systemic
+    # null-to-empty-CefString CHECK() class of bug).
+    add_subdirectory(${CMAKE_SOURCE_DIR}/tools_native/null_param_repro
+                      ${CMAKE_CURRENT_BINARY_DIR}/null_param_repro)
 
-  # Same reasoning as leak_probe above -- see
-  # tools_native/issue10_repro/issue10_repro.cc's own comment (minimum
-  # pure-C++ repro for GH issue #10 / the #4/#23 family's shutdown SIGSEGV).
-  add_subdirectory(${CMAKE_SOURCE_DIR}/tools_native/issue10_repro
-                    ${CMAKE_CURRENT_BINARY_DIR}/issue10_repro)
+    # Same reasoning as leak_probe above -- see
+    # tools_native/issue10_repro/issue10_repro.cc's own comment (minimum
+    # pure-C++ repro for GH issue #10 / the #4/#23 family's shutdown SIGSEGV).
+    add_subdirectory(${CMAKE_SOURCE_DIR}/tools_native/issue10_repro
+                      ${CMAKE_CURRENT_BINARY_DIR}/issue10_repro)
 
-  # Same reasoning as leak_probe above -- see
-  # tools_native/jni_noop_probe/JniNoOpProbe.cpp's own comment. Its own
-  # separate .so, never linked into libjcef.so.
-  add_subdirectory(${CMAKE_SOURCE_DIR}/tools_native/jni_noop_probe
-                    ${CMAKE_CURRENT_BINARY_DIR}/jni_noop_probe)
+    # Same reasoning as leak_probe above -- see
+    # tools_native/jni_noop_probe/JniNoOpProbe.cpp's own comment. Its own
+    # separate .so, never linked into libjcef.so.
+    add_subdirectory(${CMAKE_SOURCE_DIR}/tools_native/jni_noop_probe
+                      ${CMAKE_CURRENT_BINARY_DIR}/jni_noop_probe)
+  endif()
 
   # JCEF library target.
   add_library(${JCEF_TARGET} SHARED ${JCEF_SRCS})
@@ -486,13 +491,7 @@ endif()
 # Applied once here (rather than in each platform-specific block above) since
 # ${JCEF_TARGET} is defined by now regardless of which OS branch ran. Only
 # instruments this repo's own native/*.cpp -- not the vendored libcef_dll_wrapper.
-# GCC/Clang (gcov) only; not supported on Windows (would need a different tool, e.g.
-# OpenCppCoverage).
-if(ENABLE_COVERAGE AND NOT OS_WINDOWS)
-  target_compile_options(${JCEF_TARGET} PRIVATE --coverage -O0)
-  target_link_options(${JCEF_TARGET} PRIVATE --coverage)
-endif()
-
+# Not supported on Windows (would need a different tool, e.g. OpenCppCoverage).
 # See CMakeLists.txt's ENABLE_LLVM_COVERAGE option.
 if(ENABLE_LLVM_COVERAGE AND NOT OS_WINDOWS)
   target_compile_options(${JCEF_TARGET} PRIVATE -fprofile-instr-generate -fcoverage-mapping -O0 -g)
@@ -510,4 +509,3 @@ endif()
 if(JCEF_ENABLE_TRACE)
   target_compile_definitions(${JCEF_TARGET} PRIVATE JCEF_ENABLE_TRACE)
 endif()
-

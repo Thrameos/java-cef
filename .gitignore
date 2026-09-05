@@ -69,3 +69,7 @@ Thumbs.db
 # ad hoc with a plain g++ invocation, not via CMake; see its own comment)
 /tools_native/malloc_trace/malloc_trace.so
 /tools_native/malloc_trace/selftest
+# Crash-log cruft (JVM hs_err_pid*.log)
+*.log
+# clang-18 toolchain, fetched on demand (see plan/workflows/coverage.md)
+/tools/toolchain/

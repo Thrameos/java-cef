@@ -63,7 +63,7 @@ class CefDownloadItemTest {
         String[] finalFullPath = {null};
         long[] finalReceivedBytes = {-1};
 
-        File targetFile = File.createTempFile("jcef-download-test-", ".bin");
+        File targetFile = Files.createTempFile("jcef-download-test-", ".bin").toFile();
         targetFile.delete();
         targetFile.deleteOnExit();
 
@@ -159,7 +159,7 @@ class CefDownloadItemTest {
         boolean[] gotBeforeDownload = {false};
         boolean[] gotCanceled = {false};
 
-        File targetFile = File.createTempFile("jcef-download-cancel-test-", ".bin");
+        File targetFile = Files.createTempFile("jcef-download-cancel-test-", ".bin").toFile();
         targetFile.delete();
         targetFile.deleteOnExit();
 

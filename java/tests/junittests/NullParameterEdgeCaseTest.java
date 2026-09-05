@@ -35,7 +35,7 @@ import java.util.Date;
 // url/method) used to marshal to an empty CefString() with no guard on the
 // JCEF side -- silently fine in a Release build (CEF's own generated
 // ctocpp wrapper already no-ops on empty after its DCHECK, which compiles
-// out), but a fatal abort in a Debug/ENABLE_COVERAGE build (DCHECK is real
+// out), but a fatal abort in a Debug build (DCHECK is real
 // there). Fixed by adding an empty-string guard in each of native/
 // CefRequest_N.cpp's N_SetMethod/N_Set, CefResponse_N.cpp's
 // N_SetHeaderByName, and CefPostDataElement_N.cpp's N_SetToFile -- matching

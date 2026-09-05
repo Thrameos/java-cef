@@ -5,7 +5,14 @@
 
 set RETURNCODE=
 setlocal
-cd ..
+:: Resolve relative to this script's own location (repo_root/tools/..),
+:: not the caller's cwd -- unlike compile.sh (which uses dirname "$0"),
+:: this used to `cd ..` blindly, which only worked if invoked with cwd
+:: already set to tools/. Invoking as `tools\compile.bat <platform>` from
+:: the repo root (the documented convention, and how compile.sh is
+:: invoked) landed one directory above the repo, silently matching zero
+:: files for every javac wildcard below.
+cd /d "%~dp0.."
 
 if "%1" == "" (
 echo ERROR: Please specify a target platform: win32 or win64

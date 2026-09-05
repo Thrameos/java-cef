@@ -2,23 +2,21 @@
 // reserved. Use of this source code is governed by a BSD-style license that
 // can be found in the LICENSE file.
 
-// Only compiled into the build when ENABLE_COVERAGE or ENABLE_LLVM_COVERAGE is
-// on (see native/CMakeLists.txt) -- test/CI infrastructure only, not part of
-// any normal build or the public API. See java-cef#4 / plan/findings.md: CEF's
+// Only compiled into the build when ENABLE_LLVM_COVERAGE is on (see
+// native/CMakeLists.txt) -- test/CI infrastructure only, not part of any
+// normal build or the public API. See java-cef#4 / plan/findings.md: CEF's
 // native shutdown reliably crashes in Debug builds (which coverage
 // instrumentation requires), before the coverage runtime's own exit-time flush
 // can run. Explicitly flushing here, right before that known-crashing shutdown
 // call, lets CI still collect real coverage data for everything that ran up to
 // that point instead of losing it entirely.
 //
-// JCEF_LLVM_COVERAGE (set by native/CMakeLists.txt when ENABLE_LLVM_COVERAGE
-// is on) selects Clang's source-based coverage runtime (__llvm_profile_write_
-// file) instead of gcov's (__gcov_dump) -- see CMakeLists.txt's
-// ENABLE_LLVM_COVERAGE option comment for why the two are mutually exclusive
-// (gcov's .gcda writer is not multi-process-safe against CEF's zygote-style
-// fork()s; Clang's per-process raw profile files, one per PID via
-// LLVM_PROFILE_FILE's %p pattern, sidestep that -- the same fix Chromium's own
-// coverage builds use).
+// Uses Clang's source-based coverage runtime (__llvm_profile_write_file) --
+// see CMakeLists.txt's ENABLE_LLVM_COVERAGE option comment for why: each
+// process gets its own raw profile file (LLVM_PROFILE_FILE's %p pattern
+// embeds the PID), which sidesteps the multi-process-unsafety that gcov-style
+// instrumentation would hit against CEF's zygote-style fork()s -- the same
+// fix Chromium's own coverage builds use.
 
 #include <jni.h>
 
@@ -26,13 +24,8 @@
 #include <cstdlib>
 #include <cstring>
 
-#if defined(JCEF_LLVM_COVERAGE)
 extern "C" int __llvm_profile_write_file(void);
 #define JCEF_COVERAGE_DUMP() __llvm_profile_write_file()
-#else
-extern "C" void __gcov_dump(void);
-#define JCEF_COVERAGE_DUMP() __gcov_dump()
-#endif
 
 extern "C" JNIEXPORT void JNICALL
 Java_tests_junittests_CoverageTestHelper_N_1FlushCoverage(JNIEnv*, jclass) {
@@ -47,11 +40,12 @@ namespace {
 // *other*, unrelated native crashes too (mid-test, not just at shutdown --
 // e.g. a pthread_mutex_lock SIGSEGV inside Context::DoMessageLoopWork() hit
 // while measuring CefBrowser_N.cpp's SendKeyEvent coverage), each of which
-// silently discarded that whole run's gcov counters: a SIGSEGV/SIGABRT
-// bypasses both the explicit flush above and gcov's own atexit-registered
-// flush, since neither runs on abnormal termination. Rather than special-
-// case each crash as it's discovered, install a signal handler once (only
-// in this ENABLE_COVERAGE-only file, loaded automatically via the
+// silently discarded that whole run's coverage counters: a SIGSEGV/SIGABRT
+// bypasses both the explicit flush above and the coverage runtime's own
+// atexit-registered flush, since neither runs on abnormal termination.
+// Rather than special-case each crash as it's discovered, install a signal
+// handler once (only in this ENABLE_LLVM_COVERAGE-only file, loaded
+// automatically via the
 // constructor attribute below -- no Java-side wiring needed) that dumps
 // whatever counters exist so far before the crash takes down the process,
 // so a mid-run crash costs that run's *remaining* coverage, not everything
@@ -104,16 +98,17 @@ void InstallOne(int signum) {
 void __attribute__((constructor)) InstallCoverageCrashHandler() {
   // Deliberately NOT SIGABRT: TestSetupExtension.close() already calls
   // Java_..._CoverageTestHelper_N_1FlushCoverage() (a normal, non-signal-
-  // context __gcov_dump() call, safe to use libgcov's file I/O) right
+  // context dump call, safe to use the coverage runtime's file I/O) right
   // before the one well-understood, expected SIGABRT this codebase hits on
   // every coverage run (CefApp.dispose()'s native-shutdown DCHECK -- see
-  // the file comment above). Confirmed directly: adding SIGABRT here too
-  // made even a *successful*, crash-free-per-JUnit test run show 0%
-  // coverage for the file it touched -- a second, signal-context
-  // __gcov_dump() call (async-signal-unsafe: libgcov's dump internally
-  // does buffered file I/O) firing microseconds after the first, safe one
-  // corrupts the very .gcda file the safe call just wrote. This handler
-  // exists for the *other* crash signals that have no such existing
+  // the file comment above). Confirmed directly (with the earlier gcov-based
+  // instrumentation this file originally used, which had the same hazard):
+  // adding SIGABRT here too made even a *successful*, crash-free-per-JUnit
+  // test run show 0% coverage for the file it touched -- a second, signal-
+  // context dump call (async-signal-unsafe: the coverage runtime's dump
+  // internally does buffered file I/O) firing microseconds after the first,
+  // safe one corrupts the very profile file the safe call just wrote. This
+  // handler exists for the *other* crash signals that have no such existing
   // coverage, which never double-fire against the safe path.
   InstallOne(SIGSEGV);
   InstallOne(SIGBUS);

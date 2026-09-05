@@ -24,6 +24,8 @@
 #include "context.h"
 #include "jcef_trace.h"
 
+#include "context.h"
+
 //
 // --------
 // OVERVIEW
@@ -736,10 +738,18 @@ class ScopedJNIObject : public ScopedJNIBase<jobject> {
     TraceAcquired();
   }
 
-  // Invalidate the Java object on destruction.
+  // Invalidate the Java object on destruction. A no-op if this object never
+  // wrapped a real CEF object (e.g. CEF invoked the owning callback with a
+  // null frame/request/etc.) -- the destructor already gates cleanup on
+  // created_handle_, so there's nothing to invalidate in that case. See
+  // Thrameos/java-cef coverage/phase1 investigation: SchemeHandlerFactory::
+  // Create() calls jframe.SetTemporary() unconditionally, and CEF can invoke
+  // it with a null frame for frame-less requests -- this DCHECK previously
+  // fired there (visible only in Debug builds, since DCHECK is compiled out
+  // in Release).
   void SetTemporary() {
-    DCHECK(created_handle_);
-    temporary_ = true;
+    if (created_handle_)
+      temporary_ = true;
   }
 
   // Get an existing native CEF object.
