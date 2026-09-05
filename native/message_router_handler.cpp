@@ -42,6 +42,12 @@ bool MessageRouterHandler::OnQuery(
   ScopedJNIString jrequest(env, request);
   ScopedJNIQueryCallback jcallback(env, callback);
 
+  // Record whether this query is persistent so CefQueryCallback_N::success()
+  // knows not to release its native reference after the first call. See
+  // Thrameos/java-cef#13.
+  JNI_CALL_VOID_METHOD(env, jcallback.get(), "setPersistent", "(Z)V",
+                        persistent ? JNI_TRUE : JNI_FALSE);
+
   jboolean jresult = JNI_FALSE;
 
   JNI_CALL_METHOD(env, handle_, "onQuery",
