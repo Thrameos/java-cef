@@ -74,7 +74,13 @@ Java_org_cef_network_CefRequest_1N_N_1SetURL(JNIEnv* env,
   // right after), so skip the call entirely for a null Java string.
   if (!jurl)
     return;
-  request->SetURL(GetJNIString(env, jurl));
+  // A non-null but empty Java string reaches the same DCHECK -- CEF's own
+  // CHECK(!url.empty()) aborts the Debug/coverage build (silently permitted
+  // in Release). See Thrameos/java-cef#21.
+  CefString url = GetJNIString(env, jurl);
+  if (url.empty())
+    return;
+  request->SetURL(url);
 }
 
 JNIEXPORT void JNICALL
@@ -270,8 +276,13 @@ Java_org_cef_network_CefRequest_1N_N_1SetHeaderByName(JNIEnv* env,
   // empty one right after), so skip the call entirely for a null Java name.
   if (!jname)
     return;
-  return request->SetHeaderByName(GetJNIString(env, jname),
-                                  GetJNIString(env, jvalue),
+  // A non-null but empty Java name reaches the same DCHECK -- CEF's own
+  // CHECK(!name.empty()) aborts the Debug/coverage build (silently
+  // permitted in Release). See Thrameos/java-cef#20.
+  CefString name = GetJNIString(env, jname);
+  if (name.empty())
+    return;
+  return request->SetHeaderByName(name, GetJNIString(env, jvalue),
                                   joverride != JNI_FALSE);
 }
 
