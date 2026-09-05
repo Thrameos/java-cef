@@ -60,6 +60,19 @@ class CefCookieManager_N extends CefCookieManager implements CefNative {
         return globalInstance;
     }
 
+    // Releases the persistent native reference cached in globalInstance --
+    // see Thrameos/java-cef#23 (this follows the exact same leaked-static
+    // pattern as CefRequestContext_N.globalInstance, since the global
+    // cookie manager is tied to the global request context's underlying
+    // CefBrowserContext). Must be called before CefApp.shutdown() calls
+    // N_Shutdown().
+    static final void disposeGlobalManagerNative() {
+        if (globalInstance != null) {
+            globalInstance.dispose();
+            globalInstance = null;
+        }
+    }
+
     @Override
     public void dispose() {
         try {

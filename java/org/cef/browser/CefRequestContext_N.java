@@ -91,6 +91,22 @@ class CefRequestContext_N extends CefRequestContext implements CefNative {
         return globalInstance;
     }
 
+    // Releases the single persistent native reference this class caches in
+    // globalInstance (every CefBrowser without an explicit CefRequestContext
+    // falls back to CefRequestContext.getGlobalContext(), so this is almost
+    // always populated). Without this, that AddRef'd reference to the native
+    // global CefRequestContext/CefBrowserContext survives indefinitely (a
+    // static field, never otherwise cleared), keeping it registered in CEF's
+    // internal ImplManager past CefShutdown() -- see Thrameos/java-cef#23's
+    // "DCHECK failed: all_.empty()" during final process teardown. Must be
+    // called before CefApp.shutdown() calls N_Shutdown().
+    static final void disposeGlobalContextNative() {
+        if (globalInstance != null) {
+            globalInstance.dispose();
+            globalInstance = null;
+        }
+    }
+
     static final CefRequestContext_N createNative(CefRequestContextHandler handler) {
         CefRequestContext_N result = null;
         try {

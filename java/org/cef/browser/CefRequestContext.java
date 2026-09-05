@@ -42,6 +42,15 @@ public abstract class CefRequestContext {
         return CefRequestContext_N.createNative(handler);
     }
 
+    /**
+     * Used internally by {@link org.cef.CefApp}'s shutdown sequence to release the single
+     * persistent native reference cached by {@link #getGlobalContext()} before native CEF
+     * shutdown runs. Not intended for application use.
+     */
+    public static final void disposeGlobalContext() {
+        CefRequestContext_N.disposeGlobalContextNative();
+    }
+
     public abstract void dispose();
 
     /**
