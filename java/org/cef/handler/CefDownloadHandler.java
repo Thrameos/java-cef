@@ -21,6 +21,19 @@ public interface CefDownloadHandler {
      * download shelf with Chrome style). Do not keep a reference to
      * downloadItem outside of this method.
      *
+     * <p><b>Warning:</b> this project runs CEF's Chrome-style runtime, so
+     * returning false here does <i>not</i> cancel the download -- it falls
+     * through to Chrome's own download-shelf default handling, which this
+     * project's embedding does not implement. That default handling posts a
+     * task to the UI thread asynchronously, and if the browser that started
+     * the download is torn down before that task runs (a common case if a
+     * test or app closes the browser right after starting the download),
+     * the underlying CEF implementation dereferences an already-gone
+     * download-target callback and crashes the process with an internal
+     * {@code CHECK} failure. To actually cancel, return true and either
+     * never call {@code callback.Continue(...)}, or call it with an empty
+     * path.
+     *
      * @param browser The desired browser.
      * @param downloadItem The item to be downloaded. Do not keep a reference to it outside this
      * method.
