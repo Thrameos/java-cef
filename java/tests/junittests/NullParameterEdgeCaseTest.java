@@ -154,4 +154,40 @@ class NullParameterEdgeCaseTest {
         assertDoesNotThrow(() -> router[0] = CefMessageRouter.create(config));
         if (router[0] != null) router[0].dispose();
     }
+
+    // Regression tests for issue #21's remaining call sites: a non-null but
+    // empty Java String reaches the same CEF-internal CHECK(!x.empty()) a
+    // null string does (the null-vs-empty distinction only matters on the
+    // JNI marshaling side, not to CEF itself). N_SetURL and the request
+    // N_SetHeaderByName's name param already got this guard in an earlier
+    // fix; these four remaining call sites (CefPostDataElement's
+    // N_SetToFile, CefRequest's N_SetMethod/N_Set, CefResponse's
+    // N_SetHeaderByName) previously only guarded the null case, not empty.
+    @Test
+    void postDataElementSetToFileWithEmptyStringDoesNotThrow() {
+        CefPostDataElement element = CefPostDataElement.create();
+        assertDoesNotThrow(() -> element.setToFile(""));
+        element.dispose();
+    }
+
+    @Test
+    void requestSetMethodWithEmptyStringDoesNotThrow() {
+        CefRequest request = CefRequest.create();
+        assertDoesNotThrow(() -> request.setMethod(""));
+        request.dispose();
+    }
+
+    @Test
+    void requestSetWithEmptyUrlAndMethodDoesNotThrow() {
+        CefRequest request = CefRequest.create();
+        assertDoesNotThrow(() -> request.set("", "", null, null));
+        request.dispose();
+    }
+
+    @Test
+    void responseSetHeaderByNameWithEmptyNameDoesNotThrow() {
+        CefResponse response = CefResponse.create();
+        assertDoesNotThrow(() -> response.setHeaderByName("", "value", true));
+        response.dispose();
+    }
 }
