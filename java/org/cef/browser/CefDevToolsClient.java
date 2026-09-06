@@ -18,6 +18,7 @@ public class CefDevToolsClient implements AutoCloseable {
             Collections.synchronizedSet(new LinkedHashSet<>());
     private CefRegistration registration_;
     private final CefBrowser_N browser_;
+    private volatile boolean agentAttached_ = false;
 
     /**
      * Use {@link CefBrowser#getDevToolsClient()} to get an instance of this class.
@@ -45,7 +46,29 @@ public class CefDevToolsClient implements AutoCloseable {
                     eventListener.onEvent(method, parameters);
                 }
             }
+
+            @Override
+            public void onDevToolsAgentAttached(CefBrowser browser) {
+                agentAttached_ = true;
+            }
+
+            @Override
+            public void onDevToolsAgentDetached(CefBrowser browser) {
+                agentAttached_ = false;
+            }
         });
+    }
+
+    /**
+     * Returns true if the DevTools agent has attached (per {@link
+     * CefDevToolsMessageObserver#onDevToolsAgentAttached}). Per that method's own
+     * documentation, attachment generally happens in response to the first
+     * message sent while detached -- so this reflects state that changes as a
+     * side effect of calling {@link #executeDevToolsMethod}, not a precondition
+     * for it.
+     */
+    public boolean isAgentAttached() {
+        return agentAttached_;
     }
 
     @Override

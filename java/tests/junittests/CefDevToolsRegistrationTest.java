@@ -63,4 +63,48 @@ class CefDevToolsRegistrationTest {
         assertFalse(wasClosedBefore[0], "Freshly obtained CefDevToolsClient reported closed");
         assertTrue(wasClosedAfter[0], "CefDevToolsClient did not report closed after close()");
     }
+
+    // Smoke test for isAgentAttached() (backed by CefDevToolsMessageObserver's
+    // onDevToolsAgentAttached/onDevToolsAgentDetached, added to close the API
+    // gap against the real C++ CefDevToolsMessageObserver interface). Per that
+    // interface's own doc comment, attachment "will generally occur in
+    // response to the first message sent while the agent is detached" --
+    // executeDevToolsMethod() is a confirmed unrecoverable hang in this
+    // environment (issue #12, see class comment above), so this only verifies
+    // the new accessor's safe default (never attached) rather than exercising
+    // an actual attach/detach transition.
+    @Test
+    void isAgentAttachedDefaultsToFalseBeforeAnyMessageIsSent() {
+        boolean[] done = {false};
+        boolean[] wasAttached = {true};
+
+        TestFrame frame = new TestFrame() {
+            CefDevToolsClient client;
+
+            @Override
+            protected void setupTest() {
+                addResource(TEST_URL, "<html><body>devtools registration test</body></html>",
+                        "text/html");
+                createBrowser(TEST_URL, true /* useOSR */);
+                super.setupTest();
+            }
+
+            @Override
+            public void onLoadingStateChange(CefBrowser browser, boolean isLoading,
+                    boolean canGoBack, boolean canGoForward) {
+                if (isLoading || done[0]) return;
+                client = browser.getDevToolsClient();
+                wasAttached[0] = client.isAgentAttached();
+                client.close();
+                done[0] = true;
+                terminateTest();
+            }
+        };
+
+        frame.awaitCompletion();
+
+        assertTrue(done[0], "getDevToolsClient() never completed");
+        assertFalse(wasAttached[0],
+                "isAgentAttached() should default to false before any message is sent");
+    }
 }
