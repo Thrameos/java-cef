@@ -225,4 +225,116 @@ class CefDownloadItemTest {
         assertTrue(gotBeforeDownload[0], "onBeforeDownload was never invoked");
         assertTrue(gotCanceled[0], "Download was never canceled");
     }
+
+    // Locks in the fix for the crash trap root-caused in
+    // plan/tasks/20260905-26-download-shelf-check-crash.md: under CEF's own
+    // C++ contract, returning false from onBeforeDownload only cancels
+    // under Alloy style -- under Chrome style (this project's runtime) it
+    // instead falls through to Chrome's own download-shelf default
+    // handling, which this project's embedding never implemented, and
+    // which could crash the process with an internal CEF CHECK failure if
+    // the browser was torn down before that deferred handling ran.
+    // native/download_handler.cpp's OnBeforeDownload now normalizes a false
+    // Java return to a safe cancel (drop the callback un-run, still return
+    // true to CEF) before it ever reaches that runtime-dependent path, so
+    // a plain `return false` is now just as safe as the old
+    // true-and-drop-the-callback workaround. Both forms are exercised here
+    // to prove the normalization covers both.
+    private static final String REJECT_DOWNLOAD_URL = "http://test.com/download-reject.bin";
+    private static final String REJECT_DOWNLOAD_URL_2 = "http://test.com/download-reject-2.bin";
+
+    @Test
+    void rejectingDownloadByReturningFalseDoesNotCrash() throws Exception {
+        boolean[] gotBeforeDownload = {false};
+
+        File targetFile = Files.createTempFile("jcef-download-reject-test-", ".bin").toFile();
+        targetFile.delete();
+        targetFile.deleteOnExit();
+
+        TestFrame frame = new TestFrame() {
+            @Override
+            protected void setupTest() {
+                HashMap<String, String> headers = new HashMap<>();
+                headers.put("Content-Disposition", "attachment; filename=\"test-reject.bin\"");
+                addResource(REJECT_DOWNLOAD_URL, DOWNLOAD_CONTENT, "application/octet-stream",
+                        headers);
+
+                client_.addDownloadHandler(new CefDownloadHandler() {
+                    @Override
+                    public boolean onBeforeDownload(CefBrowser browser,
+                            CefDownloadItem downloadItem, String suggestedName_,
+                            CefBeforeDownloadCallback callback) {
+                        if (gotBeforeDownload[0]) return false;
+                        gotBeforeDownload[0] = true;
+                        // Reject the download by returning false directly --
+                        // now normalized to a safe cancel at the JNI layer
+                        // instead of falling through to CEF's Chrome-style
+                        // default handling. See the class-level note above.
+                        terminateTest();
+                        return false;
+                    }
+
+                    @Override
+                    public void onDownloadUpdated(CefBrowser browser,
+                            CefDownloadItem downloadItem, CefDownloadItemCallback callback) {}
+                });
+
+                createBrowser(REJECT_DOWNLOAD_URL, true /* useOSR */);
+                super.setupTest();
+            }
+        };
+
+        frame.awaitCompletion();
+
+        assertTrue(gotBeforeDownload[0], "onBeforeDownload was never invoked");
+        assertTrue(!targetFile.exists(),
+                "Rejected download should never have written a target file: " + targetFile);
+    }
+
+    @Test
+    void rejectingDownloadByReturningTrueAndDroppingCallbackDoesNotCrash() throws Exception {
+        boolean[] gotBeforeDownload = {false};
+
+        File targetFile = Files.createTempFile("jcef-download-reject-test-", ".bin").toFile();
+        targetFile.delete();
+        targetFile.deleteOnExit();
+
+        TestFrame frame = new TestFrame() {
+            @Override
+            protected void setupTest() {
+                HashMap<String, String> headers = new HashMap<>();
+                headers.put("Content-Disposition", "attachment; filename=\"test-reject-2.bin\"");
+                addResource(REJECT_DOWNLOAD_URL_2, DOWNLOAD_CONTENT, "application/octet-stream",
+                        headers);
+
+                client_.addDownloadHandler(new CefDownloadHandler() {
+                    @Override
+                    public boolean onBeforeDownload(CefBrowser browser,
+                            CefDownloadItem downloadItem, String suggestedName_,
+                            CefBeforeDownloadCallback callback) {
+                        if (gotBeforeDownload[0]) return true;
+                        gotBeforeDownload[0] = true;
+                        // Reject the download the older, still-supported
+                        // way: return true, never call
+                        // callback.Continue(...).
+                        terminateTest();
+                        return true;
+                    }
+
+                    @Override
+                    public void onDownloadUpdated(CefBrowser browser,
+                            CefDownloadItem downloadItem, CefDownloadItemCallback callback) {}
+                });
+
+                createBrowser(REJECT_DOWNLOAD_URL_2, true /* useOSR */);
+                super.setupTest();
+            }
+        };
+
+        frame.awaitCompletion();
+
+        assertTrue(gotBeforeDownload[0], "onBeforeDownload was never invoked");
+        assertTrue(!targetFile.exists(),
+                "Rejected download should never have written a target file: " + targetFile);
+    }
 }

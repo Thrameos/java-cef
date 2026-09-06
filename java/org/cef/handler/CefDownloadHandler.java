@@ -16,10 +16,23 @@ import org.cef.callback.CefDownloadItemCallback;
 public interface CefDownloadHandler {
     /**
      * Called before a download begins. Return true and execute |callback| either
-     * asynchronously or in this method to continue or cancel the download.
-     * Return false to proceed with default handling (cancel with Alloy style,
-     * download shelf with Chrome style). Do not keep a reference to
-     * downloadItem outside of this method.
+     * asynchronously or in this method to continue the download. Return false
+     * to cancel the download. Do not keep a reference to downloadItem outside
+     * of this method.
+     *
+     * <p>Unlike CEF's own C++ {@code CefDownloadHandler::OnBeforeDownload},
+     * returning false here always cancels safely, regardless of runtime
+     * style. (CEF's own contract is runtime-dependent: cancel under Alloy
+     * style, but Chrome-style default download-shelf handling otherwise --
+     * this project's embedding never implemented that shelf UI, and letting
+     * a false return reach it could crash the process with an internal
+     * {@code CHECK} failure if the browser was torn down before CEF's
+     * deferred shelf-handling task ran; see
+     * plan/tasks/20260905-26-download-shelf-check-crash.md for the original
+     * root-cause writeup.) The JNI binding now normalizes false to a safe
+     * cancel (drop the callback un-run) before it ever reaches CEF, so both
+     * true+drop-callback and a plain false return are equally safe ways to
+     * reject a download.
      *
      * @param browser The desired browser.
      * @param downloadItem The item to be downloaded. Do not keep a reference to it outside this
