@@ -180,6 +180,13 @@ public abstract class CefClientHandler implements CefNative {
     abstract protected CefLoadHandler getLoadHandler();
 
     /**
+     * Return the handler for permission requests.
+     * This method is a callback method and is called by
+     * the native code.
+     */
+    abstract protected CefPermissionHandler getPermissionHandler();
+
+    /**
      * Return the handler for printing on Linux. If a print handler is not
      * provided then printing will not be supported on the Linux platform.
      * This method is a callback method and is called by
@@ -313,6 +320,14 @@ public abstract class CefClientHandler implements CefNative {
         }
     }
 
+    protected void removePermissionHandler(CefPermissionHandler h) {
+        try {
+            N_removePermissionHandler(h);
+        } catch (UnsatisfiedLinkError err) {
+            err.printStackTrace();
+        }
+    }
+
     protected void removePrintHandler(CefPrintHandler h) {
         try {
             N_removePrintHandler(h);
@@ -368,6 +383,7 @@ public abstract class CefClientHandler implements CefNative {
     private final native void N_removeKeyboardHandler(CefKeyboardHandler h);
     private final native void N_removeLifeSpanHandler(CefLifeSpanHandler h);
     private final native void N_removeLoadHandler(CefLoadHandler h);
+    private final native void N_removePermissionHandler(CefPermissionHandler h);
     private final native void N_removePrintHandler(CefPrintHandler h);
     private final native void N_removeMessageRouter(CefMessageRouter h);
     private final native void N_removeRenderHandler(CefRenderHandler h);

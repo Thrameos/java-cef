@@ -14,7 +14,9 @@ import org.cef.callback.CefDownloadItemCallback;
 import org.cef.callback.CefDragData;
 import org.cef.callback.CefFileDialogCallback;
 import org.cef.callback.CefJSDialogCallback;
+import org.cef.callback.CefMediaAccessCallback;
 import org.cef.callback.CefMenuModel;
+import org.cef.callback.CefPermissionPromptCallback;
 import org.cef.callback.CefPrintDialogCallback;
 import org.cef.callback.CefPrintJobCallback;
 import org.cef.handler.CefClientHandler;
@@ -30,6 +32,7 @@ import org.cef.handler.CefJSDialogHandler;
 import org.cef.handler.CefKeyboardHandler;
 import org.cef.handler.CefLifeSpanHandler;
 import org.cef.handler.CefLoadHandler;
+import org.cef.handler.CefPermissionHandler;
 import org.cef.handler.CefPrintHandler;
 import org.cef.handler.CefRenderHandler;
 import org.cef.handler.CefRequestHandler;
@@ -70,7 +73,8 @@ public class CefClient extends CefClientHandler
         implements CefContextMenuHandler, CefDialogHandler, CefDisplayHandler, CefDownloadHandler,
                    CefDragHandler, CefFindHandler, CefFocusHandler, CefFrameHandler,
                    CefJSDialogHandler, CefKeyboardHandler, CefLifeSpanHandler, CefLoadHandler,
-                   CefPrintHandler, CefRenderHandler, CefRequestHandler, CefWindowHandler {
+                   CefPermissionHandler, CefPrintHandler, CefRenderHandler, CefRequestHandler,
+                   CefWindowHandler {
     private HashMap<Integer, CefBrowser> browser_ = new HashMap<Integer, CefBrowser>();
     private CefContextMenuHandler contextMenuHandler_ = null;
     private CefDialogHandler dialogHandler_ = null;
@@ -84,6 +88,7 @@ public class CefClient extends CefClientHandler
     private CefKeyboardHandler keyboardHandler_ = null;
     private CefLifeSpanHandler lifeSpanHandler_ = null;
     private CefLoadHandler loadHandler_ = null;
+    private CefPermissionHandler permissionHandler_ = null;
     private CefPrintHandler printHandler_ = null;
     private CefRequestHandler requestHandler_ = null;
     private boolean isDisposed_ = false;
@@ -236,6 +241,11 @@ public class CefClient extends CefClientHandler
 
     @Override
     protected CefLoadHandler getLoadHandler() {
+        return this;
+    }
+
+    @Override
+    protected CefPermissionHandler getPermissionHandler() {
         return this;
     }
 
@@ -718,6 +728,7 @@ public class CefClient extends CefClientHandler
                 removeKeyboardHandler(this);
                 removeLifeSpanHandler(this);
                 removeLoadHandler(this);
+                removePermissionHandler(this);
                 removePrintHandler(this);
                 removeRenderHandler(this);
                 removeRequestHandler(this);
@@ -764,6 +775,43 @@ public class CefClient extends CefClientHandler
             String errorText, String failedUrl) {
         if (loadHandler_ != null && browser != null)
             loadHandler_.onLoadError(browser, frame, errorCode, errorText, failedUrl);
+    }
+
+    // CefPermissionHandler
+
+    public CefClient addPermissionHandler(CefPermissionHandler handler) {
+        if (permissionHandler_ == null) permissionHandler_ = handler;
+        return this;
+    }
+
+    public void removePermissionHandler() {
+        permissionHandler_ = null;
+    }
+
+    @Override
+    public boolean onRequestMediaAccessPermission(CefBrowser browser, CefFrame frame,
+            String requestingOrigin, int requestedPermissions,
+            CefMediaAccessCallback callback) {
+        if (permissionHandler_ != null && browser != null)
+            return permissionHandler_.onRequestMediaAccessPermission(
+                    browser, frame, requestingOrigin, requestedPermissions, callback);
+        return false;
+    }
+
+    @Override
+    public boolean onShowPermissionPrompt(CefBrowser browser, long promptId,
+            String requestingOrigin, int requestedPermissions,
+            CefPermissionPromptCallback callback) {
+        if (permissionHandler_ != null && browser != null)
+            return permissionHandler_.onShowPermissionPrompt(
+                    browser, promptId, requestingOrigin, requestedPermissions, callback);
+        return false;
+    }
+
+    @Override
+    public void onDismissPermissionPrompt(CefBrowser browser, long promptId, int result) {
+        if (permissionHandler_ != null && browser != null)
+            permissionHandler_.onDismissPermissionPrompt(browser, promptId, result);
     }
 
     // CefPrintHandler

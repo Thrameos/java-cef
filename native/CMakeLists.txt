@@ -39,10 +39,14 @@ set(JCEF_SRCS
   CefTestHelper.cpp
   CefJSDialogCallback_N.h
   CefJSDialogCallback_N.cpp
+  CefMediaAccessCallback_N.cpp
+  CefMediaAccessCallback_N.h
   CefMenuModel_N.cpp
   CefMenuModel_N.h
   CefMessageRouter_N.cpp
   CefMessageRouter_N.h
+  CefPermissionPromptCallback_N.cpp
+  CefPermissionPromptCallback_N.h
   CefPostData_N.cpp
   CefPostData_N.h
   CefPostDataElement_N.cpp
@@ -125,6 +129,8 @@ set(JCEF_SRCS
   message_router_handler.h
   pdf_print_callback.cpp
   pdf_print_callback.h
+  permission_handler.cpp
+  permission_handler.h
   print_handler.cpp
   print_handler.h
   render_handler.cpp
