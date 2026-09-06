@@ -5,7 +5,19 @@
 package org.cef.callback;
 
 class CefQueryCallback_N extends CefNativeAdapter implements CefQueryCallback {
+    // Set once via setPersistent() by MessageRouterHandler::OnQuery() (native
+    // side), before onQuery() is invoked on the Java handler. See
+    // Thrameos/java-cef#13: success() must not release the native callback
+    // after the first call when the originating query was persistent, since
+    // CEF's message router allows a persistent query's callback to be used
+    // repeatedly.
+    private boolean persistent_ = false;
+
     CefQueryCallback_N() {}
+
+    void setPersistent(boolean persistent) {
+        persistent_ = persistent;
+    }
 
     @Override
     protected void finalize() throws Throwable {
@@ -16,7 +28,7 @@ class CefQueryCallback_N extends CefNativeAdapter implements CefQueryCallback {
     @Override
     public void success(String response) {
         try {
-            N_Success(getNativeRef(null), response);
+            N_Success(getNativeRef(null), response, persistent_);
         } catch (UnsatisfiedLinkError ule) {
             ule.printStackTrace();
         }
@@ -31,6 +43,6 @@ class CefQueryCallback_N extends CefNativeAdapter implements CefQueryCallback {
         }
     }
 
-    private final native void N_Success(long self, String response);
+    private final native void N_Success(long self, String response, boolean persistent);
     private final native void N_Failure(long self, int error_code, String error_message);
 }
