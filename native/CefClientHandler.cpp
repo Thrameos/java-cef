@@ -9,6 +9,7 @@
 #include "display_handler.h"
 #include "download_handler.h"
 #include "drag_handler.h"
+#include "find_handler.h"
 #include "focus_handler.h"
 #include "jni_util.h"
 #include "jsdialog_handler.h"
@@ -90,6 +91,15 @@ Java_org_cef_handler_CefClientHandler_N_1removeDragHandler(
     jobject dragHandler) {
   SetCefForJNIObject_sync<DragHandler>(env, dragHandler, nullptr,
                                      "CefDragHandler");
+}
+
+JNIEXPORT void JNICALL
+Java_org_cef_handler_CefClientHandler_N_1removeFindHandler(
+    JNIEnv* env,
+    jobject clientHandler,
+    jobject findHandler) {
+  SetCefForJNIObject_sync<FindHandler>(env, findHandler, nullptr,
+                                     "CefFindHandler");
 }
 
 JNIEXPORT void JNICALL

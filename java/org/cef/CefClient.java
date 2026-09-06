@@ -23,6 +23,7 @@ import org.cef.handler.CefDialogHandler;
 import org.cef.handler.CefDisplayHandler;
 import org.cef.handler.CefDownloadHandler;
 import org.cef.handler.CefDragHandler;
+import org.cef.handler.CefFindHandler;
 import org.cef.handler.CefFocusHandler;
 import org.cef.handler.CefJSDialogHandler;
 import org.cef.handler.CefKeyboardHandler;
@@ -66,15 +67,16 @@ import javax.swing.SwingUtilities;
  */
 public class CefClient extends CefClientHandler
         implements CefContextMenuHandler, CefDialogHandler, CefDisplayHandler, CefDownloadHandler,
-                   CefDragHandler, CefFocusHandler, CefJSDialogHandler, CefKeyboardHandler,
-                   CefLifeSpanHandler, CefLoadHandler, CefPrintHandler, CefRenderHandler,
-                   CefRequestHandler, CefWindowHandler {
+                   CefDragHandler, CefFindHandler, CefFocusHandler, CefJSDialogHandler,
+                   CefKeyboardHandler, CefLifeSpanHandler, CefLoadHandler, CefPrintHandler,
+                   CefRenderHandler, CefRequestHandler, CefWindowHandler {
     private HashMap<Integer, CefBrowser> browser_ = new HashMap<Integer, CefBrowser>();
     private CefContextMenuHandler contextMenuHandler_ = null;
     private CefDialogHandler dialogHandler_ = null;
     private CefDisplayHandler displayHandler_ = null;
     private CefDownloadHandler downloadHandler_ = null;
     private CefDragHandler dragHandler_ = null;
+    private CefFindHandler findHandler_ = null;
     private CefFocusHandler focusHandler_ = null;
     private CefJSDialogHandler jsDialogHandler_ = null;
     private CefKeyboardHandler keyboardHandler_ = null;
@@ -197,6 +199,11 @@ public class CefClient extends CefClientHandler
 
     @Override
     protected CefDragHandler getDragHandler() {
+        return this;
+    }
+
+    @Override
+    protected CefFindHandler getFindHandler() {
         return this;
     }
 
@@ -414,6 +421,25 @@ public class CefClient extends CefClientHandler
         if (dragHandler_ != null && browser != null)
             return dragHandler_.onDragEnter(browser, dragData, mask);
         return false;
+    }
+
+    // CefFindHandler
+
+    public CefClient addFindHandler(CefFindHandler handler) {
+        if (findHandler_ == null) findHandler_ = handler;
+        return this;
+    }
+
+    public void removeFindHandler() {
+        findHandler_ = null;
+    }
+
+    @Override
+    public void onFindResult(CefBrowser browser, int identifier, int count,
+            Rectangle selectionRect, int activeMatchOrdinal, boolean finalUpdate) {
+        if (findHandler_ != null && browser != null)
+            findHandler_.onFindResult(
+                    browser, identifier, count, selectionRect, activeMatchOrdinal, finalUpdate);
     }
 
     // CefFocusHandler
@@ -638,6 +664,7 @@ public class CefClient extends CefClientHandler
                 removeDisplayHandler(this);
                 removeDownloadHandler(this);
                 removeDragHandler(this);
+                removeFindHandler(this);
                 removeFocusHandler(this);
                 removeJSDialogHandler(this);
                 removeKeyboardHandler(this);
