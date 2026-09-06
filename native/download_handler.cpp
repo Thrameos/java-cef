@@ -54,9 +54,19 @@ bool DownloadHandler::OnBeforeDownload(
     CefRefPtr<CefDownloadItem> download_item,
     const CefString& suggested_name,
     CefRefPtr<CefBeforeDownloadCallback> callback) {
+  // Always return true to CEF, regardless of what Java's onBeforeDownload
+  // returns below (see plan/tasks/20260905-26-download-shelf-check-crash.md):
+  // returning false to CEF here would defer to Chrome-style default
+  // handling (the download shelf), which this project's embedding has
+  // never implemented and which can crash the process with an internal
+  // CHECK if the browser is torn down before that deferred handling runs.
+  // Taking ownership unconditionally (true) and simply never invoking
+  // |callback| when Java's handler returns false is the same
+  // already-safe "drop the callback un-run" cancel path, just applied
+  // uniformly instead of leaving false as a latent trap.
   ScopedJNIEnv env;
   if (!env)
-    return false;
+    return true;
 
   ScopedJNIBrowser jbrowser(env, browser);
   ScopedJNIDownloadItem jdownloadItem(env, download_item);
@@ -73,7 +83,13 @@ bool DownloadHandler::OnBeforeDownload(
       jbrowser.get(), jdownloadItem.get(), jsuggestedName.get(),
       jcallback.get());
 
-  return jresult;
+  // jresult only controls whether Java's own onBeforeDownload call above
+  // was expected to invoke callback->Continue() itself (true) or leave it
+  // un-run (false) -- either way the callback's fate is already decided
+  // by the time we get here, and CEF's own return value is now always
+  // true (see the file-level comment above).
+  (void)jresult;
+  return true;
 }
 
 void DownloadHandler::OnDownloadUpdated(
