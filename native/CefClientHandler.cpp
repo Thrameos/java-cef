@@ -11,6 +11,7 @@
 #include "drag_handler.h"
 #include "find_handler.h"
 #include "focus_handler.h"
+#include "frame_handler.h"
 #include "jni_util.h"
 #include "jsdialog_handler.h"
 #include "keyboard_handler.h"
@@ -113,6 +114,15 @@ Java_org_cef_handler_CefClientHandler_N_1removeFocusHandler(
   // ordinary browser teardown) is what surfaced this whole class of bug.
   SetCefForJNIObject_sync<FocusHandler>(env, focusHandler, nullptr,
                                       "CefFocusHandler");
+}
+
+JNIEXPORT void JNICALL
+Java_org_cef_handler_CefClientHandler_N_1removeFrameHandler(
+    JNIEnv* env,
+    jobject clientHandler,
+    jobject frameHandler) {
+  SetCefForJNIObject_sync<FrameHandler>(env, frameHandler, nullptr,
+                                      "CefFrameHandler");
 }
 
 JNIEXPORT void JNICALL
