@@ -79,6 +79,9 @@ class CefClientTest {
         client.addLoadHandler(new CefLoadHandlerAdapter() {});
         client.removeLoadHandler();
 
+        client.addPermissionHandler(new org.cef.handler.CefPermissionHandlerAdapter() {});
+        client.removePermissionHandler();
+
         client.addPrintHandler(new CefPrintHandlerAdapter() {});
         client.removePrintHandler();
 

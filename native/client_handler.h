@@ -36,6 +36,7 @@ class ClientHandler : public CefClient {
   CefRefPtr<CefKeyboardHandler> GetKeyboardHandler() override;
   CefRefPtr<CefLifeSpanHandler> GetLifeSpanHandler() override;
   CefRefPtr<CefLoadHandler> GetLoadHandler() override;
+  CefRefPtr<CefPermissionHandler> GetPermissionHandler() override;
   CefRefPtr<CefPrintHandler> GetPrintHandler() override;
   CefRefPtr<CefRenderHandler> GetRenderHandler() override;
   CefRefPtr<CefRequestHandler> GetRequestHandler() override;

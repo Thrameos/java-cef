@@ -18,6 +18,7 @@
 #include "life_span_handler.h"
 #include "load_handler.h"
 #include "message_router_handler.h"
+#include "permission_handler.h"
 #include "print_handler.h"
 #include "render_handler.h"
 #include "request_handler.h"
@@ -159,6 +160,15 @@ Java_org_cef_handler_CefClientHandler_N_1removeLoadHandler(
     jobject loadHandler) {
   SetCefForJNIObject_sync<LoadHandler>(env, loadHandler, nullptr,
                                      "CefLoadHandler");
+}
+
+JNIEXPORT void JNICALL
+Java_org_cef_handler_CefClientHandler_N_1removePermissionHandler(
+    JNIEnv* env,
+    jobject clientHandler,
+    jobject permissionHandler) {
+  SetCefForJNIObject_sync<PermissionHandler>(env, permissionHandler, nullptr,
+                                           "CefPermissionHandler");
 }
 
 JNIEXPORT void JNICALL
