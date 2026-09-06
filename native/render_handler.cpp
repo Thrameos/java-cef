@@ -71,30 +71,37 @@ bool GetJNIScreenInfo(JNIEnv* env, jobject jScreenInfo, CefScreenInfo& dest) {
     return false;
   }
 
-  ScopedJNIObjectLocal obj(env, jScreenInfo);
-  if (!obj) {
+  // jScreenInfo is a local ref owned by the caller (e.g. GetScreenInfo()'s
+  // own ScopedJNIObjectLocal) -- don't wrap it in a second
+  // ScopedJNIObjectLocal here, which would DeleteLocalRef it a second time
+  // when this function returns (undefined behavior per the JNI spec, and a
+  // confirmed real double-release -- see Thrameos/java-cef#22). Only field
+  // reads are needed below, which don't require owning the ref.
+  if (!jScreenInfo) {
     return false;
   }
   double tmp;
-  if (!GetJNIFieldDouble(env, cls, obj, "device_scale_factor", &tmp)) {
+  if (!GetJNIFieldDouble(env, cls, jScreenInfo, "device_scale_factor", &tmp)) {
     return false;
   }
   dest.device_scale_factor = (float)tmp;
 
-  if (GetJNIFieldInt(env, cls, obj, "depth", &(dest.depth)) &&
-      GetJNIFieldInt(env, cls, obj, "depth_per_component",
+  if (GetJNIFieldInt(env, cls, jScreenInfo, "depth", &(dest.depth)) &&
+      GetJNIFieldInt(env, cls, jScreenInfo, "depth_per_component",
                      &(dest.depth_per_component)) &&
-      GetJNIFieldBoolean(env, cls, obj, "is_monochrome",
+      GetJNIFieldBoolean(env, cls, jScreenInfo, "is_monochrome",
                          &(dest.is_monochrome)) &&
-      GetJNIFieldInt(env, cls, obj, "x", &(dest.rect.x)) &&
-      GetJNIFieldInt(env, cls, obj, "y", &(dest.rect.y)) &&
-      GetJNIFieldInt(env, cls, obj, "width", &(dest.rect.width)) &&
-      GetJNIFieldInt(env, cls, obj, "height", &(dest.rect.height)) &&
-      GetJNIFieldInt(env, cls, obj, "available_x", &(dest.available_rect.x)) &&
-      GetJNIFieldInt(env, cls, obj, "available_y", &(dest.available_rect.y)) &&
-      GetJNIFieldInt(env, cls, obj, "available_width",
+      GetJNIFieldInt(env, cls, jScreenInfo, "x", &(dest.rect.x)) &&
+      GetJNIFieldInt(env, cls, jScreenInfo, "y", &(dest.rect.y)) &&
+      GetJNIFieldInt(env, cls, jScreenInfo, "width", &(dest.rect.width)) &&
+      GetJNIFieldInt(env, cls, jScreenInfo, "height", &(dest.rect.height)) &&
+      GetJNIFieldInt(env, cls, jScreenInfo, "available_x",
+                     &(dest.available_rect.x)) &&
+      GetJNIFieldInt(env, cls, jScreenInfo, "available_y",
+                     &(dest.available_rect.y)) &&
+      GetJNIFieldInt(env, cls, jScreenInfo, "available_width",
                      &(dest.available_rect.width)) &&
-      GetJNIFieldInt(env, cls, obj, "available_height",
+      GetJNIFieldInt(env, cls, jScreenInfo, "available_height",
                      &(dest.available_rect.height))
 
   ) {
