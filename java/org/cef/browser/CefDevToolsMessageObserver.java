@@ -31,4 +31,22 @@ interface CefDevToolsMessageObserver {
      * @param parameters the event data
      */
     void onDevToolsEvent(CefBrowser browser, String method, String parameters);
+
+    /**
+     * Method that will be called when the DevTools agent has attached. This will
+     * generally occur in response to the first message sent while the agent is
+     * detached.
+     *
+     * @param browser the originating browser instance
+     */
+    void onDevToolsAgentAttached(CefBrowser browser);
+
+    /**
+     * Method that will be called when the DevTools agent has detached. Any
+     * method results that were pending before the agent became detached will
+     * not be delivered, and any active event subscriptions will be canceled.
+     *
+     * @param browser the originating browser instance
+     */
+    void onDevToolsAgentDetached(CefBrowser browser);
 }
