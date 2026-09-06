@@ -156,8 +156,14 @@ Java_org_cef_network_CefResponse_1N_N_1SetHeaderByName(JNIEnv* env,
   // name.
   if (!jname)
     return;
-  return response->SetHeaderByName(GetJNIString(env, jname),
-                                   GetJNIString(env, jvalue),
+  // A non-null but empty Java name reaches the same DCHECK -- CEF's own
+  // CHECK(!name.empty()) aborts the Debug/coverage build (silently
+  // permitted in Release). See Thrameos/java-cef#19/#20/#21 and
+  // CefRequest_N.cpp's matching guard.
+  CefString name = GetJNIString(env, jname);
+  if (name.empty())
+    return;
+  return response->SetHeaderByName(name, GetJNIString(env, jvalue),
                                    joverride != JNI_FALSE);
 }
 

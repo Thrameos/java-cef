@@ -219,7 +219,13 @@ Java_org_cef_network_CefRequest_1N_N_1SetMethod(JNIEnv* env,
   // string rather than passing through an empty CefString.
   if (!jmethod)
     return;
-  request->SetMethod(GetJNIString(env, jmethod));
+  // A non-null but empty Java string reaches the same DCHECK -- CEF's own
+  // CHECK(!method.empty()) aborts the Debug/coverage build (silently
+  // permitted in Release). See Thrameos/java-cef#21.
+  CefString method = GetJNIString(env, jmethod);
+  if (method.empty())
+    return;
+  request->SetMethod(method);
 }
 
 JNIEXPORT jobject JNICALL
@@ -337,9 +343,17 @@ Java_org_cef_network_CefRequest_1N_N_1Set(JNIEnv* env,
   // being empty right after), so skip the call entirely for a null Java
   // string -- the SetHeaderMap() call above has no such restriction and
   // should still happen regardless.
+  //
+  // A non-null but empty Java string reaches the same DCHECK -- CEF's own
+  // CHECK(!url.empty())/CHECK(!method.empty()) abort the Debug/coverage
+  // build (silently permitted in Release). See Thrameos/java-cef#21 and
+  // this file's other matching guards.
   if (jurl && jmethod) {
-    request->Set(GetJNIString(env, jurl), GetJNIString(env, jmethod),
-                 postDataObj.GetCefObject(), headerMap);
+    CefString url = GetJNIString(env, jurl);
+    CefString method = GetJNIString(env, jmethod);
+    if (!url.empty() && !method.empty()) {
+      request->Set(url, method, postDataObj.GetCefObject(), headerMap);
+    }
   }
 }
 
