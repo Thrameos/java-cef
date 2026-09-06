@@ -18,6 +18,42 @@ else
       exit 1
     fi
 
+    # Staleness check: a source edit (native or Java) with no rebuild before
+    # this run is indistinguishable, from the test output alone, from a real
+    # regression -- and has repeatedly cost real debugging time chasing a
+    # bug that was actually just an old binary. Fail loudly and specifically
+    # instead. Grep for "^STALE_BUILD_ERROR:" to find this check's output.
+    check_stale_build() {
+      local artifact="$1" src_root="$2" rebuild_hint="$3"
+      if [ ! -e "$artifact" ]; then
+        echo "STALE_BUILD_ERROR: build artifact '$artifact' does not exist -- $rebuild_hint" >&2
+        return 1
+      fi
+      local newer
+      newer=$(find "$src_root" -type f \
+        \( -name '*.java' -o -name '*.cpp' -o -name '*.cc' -o -name '*.h' \
+           -o -name '*.mm' -o -name 'CMakeLists.txt' \) \
+        -newer "$artifact" 2>/dev/null | head -1)
+      if [ -n "$newer" ]; then
+        echo "STALE_BUILD_ERROR: '$newer' is newer than '$artifact' -- $rebuild_hint" >&2
+        return 1
+      fi
+      return 0
+    }
+    STALE=0
+    check_stale_build "$LIB_PATH/libjcef.so" "${DIR}/native" \
+      "rebuild native first (ninja -C jcef_build jcef)" || STALE=1
+    check_stale_build "$LIB_PATH/libjcef.so" "${DIR}/CMakeLists.txt" \
+      "rebuild native first (ninja -C jcef_build jcef)" || STALE=1
+    check_stale_build "$OUT_PATH/org/cef/CefApp.class" "${DIR}/java" \
+      "recompile Java first (tools/compile.sh $1)" || STALE=1
+    if [ "$STALE" -ne 0 ]; then
+      echo "STALE_BUILD_ERROR: refusing to run tests against a stale build (set JCEF_SKIP_STALE_CHECK=1 to override)" >&2
+      if [ -z "${JCEF_SKIP_STALE_CHECK:-}" ]; then
+        exit 1
+      fi
+    fi
+
     # Note: a trailing "/*" is only expanded into a jar list by the real `java`
     # launcher's own -cp/-classpath handling, which we can't use together with
     # -jar below. The JUnit console launcher's own -cp option does not expand
