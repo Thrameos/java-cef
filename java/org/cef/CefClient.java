@@ -25,6 +25,7 @@ import org.cef.handler.CefDownloadHandler;
 import org.cef.handler.CefDragHandler;
 import org.cef.handler.CefFindHandler;
 import org.cef.handler.CefFocusHandler;
+import org.cef.handler.CefFrameHandler;
 import org.cef.handler.CefJSDialogHandler;
 import org.cef.handler.CefKeyboardHandler;
 import org.cef.handler.CefLifeSpanHandler;
@@ -67,9 +68,9 @@ import javax.swing.SwingUtilities;
  */
 public class CefClient extends CefClientHandler
         implements CefContextMenuHandler, CefDialogHandler, CefDisplayHandler, CefDownloadHandler,
-                   CefDragHandler, CefFindHandler, CefFocusHandler, CefJSDialogHandler,
-                   CefKeyboardHandler, CefLifeSpanHandler, CefLoadHandler, CefPrintHandler,
-                   CefRenderHandler, CefRequestHandler, CefWindowHandler {
+                   CefDragHandler, CefFindHandler, CefFocusHandler, CefFrameHandler,
+                   CefJSDialogHandler, CefKeyboardHandler, CefLifeSpanHandler, CefLoadHandler,
+                   CefPrintHandler, CefRenderHandler, CefRequestHandler, CefWindowHandler {
     private HashMap<Integer, CefBrowser> browser_ = new HashMap<Integer, CefBrowser>();
     private CefContextMenuHandler contextMenuHandler_ = null;
     private CefDialogHandler dialogHandler_ = null;
@@ -78,6 +79,7 @@ public class CefClient extends CefClientHandler
     private CefDragHandler dragHandler_ = null;
     private CefFindHandler findHandler_ = null;
     private CefFocusHandler focusHandler_ = null;
+    private CefFrameHandler frameHandler_ = null;
     private CefJSDialogHandler jsDialogHandler_ = null;
     private CefKeyboardHandler keyboardHandler_ = null;
     private CefLifeSpanHandler lifeSpanHandler_ = null;
@@ -209,6 +211,11 @@ public class CefClient extends CefClientHandler
 
     @Override
     protected CefFocusHandler getFocusHandler() {
+        return this;
+    }
+
+    @Override
+    protected CefFrameHandler getFrameHandler() {
         return this;
     }
 
@@ -512,6 +519,46 @@ public class CefClient extends CefClientHandler
         if (focusHandler_ != null) focusHandler_.onGotFocus(browser);
     }
 
+    // CefFrameHandler
+
+    public CefClient addFrameHandler(CefFrameHandler handler) {
+        if (frameHandler_ == null) frameHandler_ = handler;
+        return this;
+    }
+
+    public void removeFrameHandler() {
+        frameHandler_ = null;
+    }
+
+    @Override
+    public void onFrameCreated(CefBrowser browser, CefFrame frame) {
+        if (frameHandler_ != null && browser != null) frameHandler_.onFrameCreated(browser, frame);
+    }
+
+    @Override
+    public void onFrameDestroyed(CefBrowser browser, CefFrame frame) {
+        if (frameHandler_ != null && browser != null)
+            frameHandler_.onFrameDestroyed(browser, frame);
+    }
+
+    @Override
+    public void onFrameAttached(CefBrowser browser, CefFrame frame, boolean reattached) {
+        if (frameHandler_ != null && browser != null)
+            frameHandler_.onFrameAttached(browser, frame, reattached);
+    }
+
+    @Override
+    public void onFrameDetached(CefBrowser browser, CefFrame frame) {
+        if (frameHandler_ != null && browser != null)
+            frameHandler_.onFrameDetached(browser, frame);
+    }
+
+    @Override
+    public void onMainFrameChanged(CefBrowser browser, CefFrame oldFrame, CefFrame newFrame) {
+        if (frameHandler_ != null && browser != null)
+            frameHandler_.onMainFrameChanged(browser, oldFrame, newFrame);
+    }
+
     // CefJSDialogHandler
 
     public CefClient addJSDialogHandler(CefJSDialogHandler handler) {
@@ -666,6 +713,7 @@ public class CefClient extends CefClientHandler
                 removeDragHandler(this);
                 removeFindHandler(this);
                 removeFocusHandler(this);
+                removeFrameHandler(this);
                 removeJSDialogHandler(this);
                 removeKeyboardHandler(this);
                 removeLifeSpanHandler(this);

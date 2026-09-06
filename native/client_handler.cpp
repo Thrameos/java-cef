@@ -19,6 +19,7 @@
 #include "drag_handler.h"
 #include "find_handler.h"
 #include "focus_handler.h"
+#include "frame_handler.h"
 #include "jsdialog_handler.h"
 #include "keyboard_handler.h"
 #include "life_span_handler.h"
@@ -120,6 +121,10 @@ CefRefPtr<CefFindHandler> ClientHandler::GetFindHandler() {
 
 CefRefPtr<CefFocusHandler> ClientHandler::GetFocusHandler() {
   return GetHandler<FocusHandler>("FocusHandler");
+}
+
+CefRefPtr<CefFrameHandler> ClientHandler::GetFrameHandler() {
+  return GetHandler<FrameHandler>("FrameHandler");
 }
 
 CefRefPtr<CefJSDialogHandler> ClientHandler::GetJSDialogHandler() {
