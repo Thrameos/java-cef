@@ -80,6 +80,13 @@ class ModifiedUtf8Test {
                 client_.addDisplayHandler(new CefDisplayHandlerAdapter() {
                     @Override
                     public void onTitleChange(CefBrowser browser, String title) {
+                        // onTitleChange can legitimately fire more than once --
+                        // e.g. an initial title defaulting to the page URL
+                        // before executeJavaScript()'s assignment below lands.
+                        // Only the JS-assigned "PASS"/"FAIL:..." value (set by
+                        // onLoadingStateChange below) is the one this test
+                        // cares about; ignore anything else.
+                        if (!title.equals("PASS") && !title.startsWith("FAIL:")) return;
                         receivedTitle[0] = title;
                         terminateTest();
                     }
